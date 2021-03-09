@@ -1,0 +1,15 @@
+
+cargo-features = ["edition2021"]
+
+[package]
+name = "robins-dice-roll"
+version = "0.1.0"
+authors = ["Robin Marchart <robin.marchart@hotmail.com>"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+log = "^0.4.14"
+rand = {version = "^0.8.3", features=["log"]}
+nom = "^6.1.2"
