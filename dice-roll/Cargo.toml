@@ -1,0 +1,26 @@
+
+cargo-features = ["edition2021"]
+
+[package]
+name = "robins-dice-roll"
+version = "0.1.0"
+authors = ["Robin Marchart <robin.marchart@tum.de>"]
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/RobinMarchart/roll-bot"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+rand = {version = "^0.8.3", optional=true}
+nom = {version = "^6.1.2", optional=true}
+
+[features]
+
+default = ["parser", "roll"]
+
+parser = ["nom"]
+
+roll = ["rand"]
+
+
