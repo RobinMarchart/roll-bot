@@ -1,28 +1,13 @@
 
-
 [package]
-name = "robins-dice-roll"
+name = "discord-bot"
 version = "0.1.0"
 authors = ["Robin Marchart <robin.marchart@tum.de>"]
 edition = "2018"
 license = "Apache-2.0"
 repository = "https://github.com/RobinMarchart/roll-bot"
-
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-rand = {version = "^0.8.3", optional=true}
-nom = {version = "^6.1.2", optional=true}
-serde = {version = "^1.0.124", optional=true}
 
-[features]
-
-default = ["parser", "roll", "serde-support"]
-
-parser = ["nom"]
-
-roll = ["rand"]
-
-serde-support = ["serde"]
-
-
+bot-utils = {path = "../bot-utils"}

@@ -1,4 +1,3 @@
-cargo-features = ["edition2021"]
 
 [workspace]
-members = ["dice-roll"]
+members = ["dice-roll", "discord-bot","bot-utils"]

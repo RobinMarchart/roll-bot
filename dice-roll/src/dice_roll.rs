@@ -231,13 +231,13 @@ impl ExpressionEvaluate for Expression {
         rng: &mut R,
     ) -> Result<Vec<(i64, Vec<i64>)>, EvaluationErrors> {
         match self {
-            Expression::Simple(term) => term.evaluate(timeout_f, rng).map(|res|vec![res]),
+            Expression::Simple(term) => term.evaluate(timeout_f, rng).map(|res| vec![res]),
             Expression::List(count, term) => {
-                let size:usize=(*count).try_into().expect("failed to convert u32 to usize");
-                let mut result_collector:Vec<(i64,Vec<i64>)> = Vec::with_capacity(size);
+                let size: usize = (*count).try_into().expect("failed to convert u32 to usize");
+                let mut result_collector: Vec<(i64, Vec<i64>)> = Vec::with_capacity(size);
                 for index in 0..size {
-                    *(result_collector.get_mut(index).unwrap())=term.evaluate(timeout_f, rng)?;
-                };
+                    *(result_collector.get_mut(index).unwrap()) = term.evaluate(timeout_f, rng)?;
+                }
                 Ok(result_collector)
             }
         }

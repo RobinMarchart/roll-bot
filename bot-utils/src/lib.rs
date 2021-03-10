@@ -14,10 +14,4 @@ Copyright 2021 Robin Marchart
    limitations under the License.
 */
 
-pub mod dice_types;
-
-#[cfg(feature = "roll")]
-pub mod dice_roll;
-
-#[cfg(feature = "parser")]
-pub mod parser;
+pub mod storage;

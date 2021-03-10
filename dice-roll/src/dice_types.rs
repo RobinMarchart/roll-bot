@@ -14,57 +14,76 @@ Copyright 2021 Robin Marchart
    limitations under the License.
 */
 
-#[derive(Debug,PartialEq, Eq,Clone, Copy)]
-pub enum DiceType{
+#[cfg(feature = "serde-support")]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[cfg_attr(feature = "serde-support", derive(Serialize, Deserialize))]
+pub enum DiceType {
     Number(u32),
     Fudge,
-    Multiply(u32)
+    Multiply(u32),
 }
 
-#[derive(Debug,PartialEq, Eq, Clone, Copy)]
-pub struct Dice{
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[cfg_attr(feature = "serde-support", derive(Serialize, Deserialize))]
+pub struct Dice {
     pub throws: u32,
-    pub dice: DiceType
+    pub dice: DiceType,
 }
 
-#[derive(Debug,PartialEq, Eq,Clone, Copy)]
-pub enum Filter{
-    Bigger,BiggerEq,Smaller,SmallerEq,NotEq
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[cfg_attr(feature = "serde-support", derive(Serialize, Deserialize))]
+pub enum Filter {
+    Bigger,
+    BiggerEq,
+    Smaller,
+    SmallerEq,
+    NotEq,
 }
 
-#[derive(Debug, PartialEq, Eq,Clone, Copy)]
-pub enum FilteredDice{
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[cfg_attr(feature = "serde-support", derive(Serialize, Deserialize))]
+pub enum FilteredDice {
     Simple(Dice),
-    Filtered(Dice,Filter,u32)
+    Filtered(Dice, Filter, u32),
 }
 
-#[derive(Debug, PartialEq, Eq,Clone, Copy)]
-pub enum Selector{
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[cfg_attr(feature = "serde-support", derive(Serialize, Deserialize))]
+pub enum Selector {
     Higher,
-    Lower
+    Lower,
 }
 
-#[derive(Debug, PartialEq, Eq,Clone, Copy)]
-pub enum SelectedDice{
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[cfg_attr(feature = "serde-support", derive(Serialize, Deserialize))]
+pub enum SelectedDice {
     Unchanged(FilteredDice),
-    Selected(FilteredDice,Selector,u32)
+    Selected(FilteredDice, Selector, u32),
 }
 
-#[derive(Debug,PartialEq, Eq,Clone, Copy)]
-pub enum Operation{
-    Mul,Div,Add,Sub
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[cfg_attr(feature = "serde-support", derive(Serialize, Deserialize))]
+pub enum Operation {
+    Mul,
+    Div,
+    Add,
+    Sub,
 }
 
-#[derive(Debug, PartialEq, Eq,Clone)]
-pub enum Term{
+#[derive(Debug, PartialEq, Eq, Clone)]
+#[cfg_attr(feature = "serde-support", derive(Serialize, Deserialize))]
+pub enum Term {
     Constant(i64),
     DiceThrow(SelectedDice),
-    Calculation(Box<Term>,Operation,Box<Term>),
-    SubTerm(Box<Term>)
+    Calculation(Box<Term>, Operation, Box<Term>),
+    SubTerm(Box<Term>),
 }
 
-#[derive(Debug, PartialEq, Eq,Clone)]
-pub enum Expression{
+#[derive(Debug, PartialEq, Eq, Clone)]
+#[cfg_attr(feature = "serde-support", derive(Serialize, Deserialize))]
+pub enum Expression {
     Simple(Term),
-    List(u32,Term)
+    List(u32, Term),
 }
