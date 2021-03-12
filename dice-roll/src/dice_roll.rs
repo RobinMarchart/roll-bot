@@ -18,13 +18,14 @@ use crate::dice_types::*;
 use rand::{distributions::Uniform, Rng};
 use std::convert::TryInto;
 
-enum EvaluationErrors {
+#[derive(Debug)]
+pub enum EvaluationErrors {
     DivideByZero,
     Timeout,
     Overflow,
 }
 
-trait DiceEvaluate {
+pub trait DiceEvaluate {
     fn evaluate<T: FnMut() -> bool, R: Rng>(
         &self,
         timeout_f: &mut T,
@@ -156,7 +157,7 @@ impl DiceEvaluate for SelectedDice {
     }
 }
 
-trait TermEvaluate {
+pub trait TermEvaluate {
     fn evaluate<T: FnMut() -> bool, R: Rng>(
         &self,
         timeout_f: &mut T,
@@ -216,7 +217,7 @@ impl TermEvaluate for Box<Term> {
     }
 }
 
-trait ExpressionEvaluate {
+pub trait ExpressionEvaluate {
     fn evaluate<T: FnMut() -> bool, R: Rng>(
         &self,
         timeout_t: &mut T,

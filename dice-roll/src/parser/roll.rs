@@ -210,8 +210,8 @@ pub fn parse_expression(input: &str) -> IResult<&str, Expression> {
     ))(input)
 }
 
-pub fn parse(input: &str) -> Result<Expression, nom::Err<nom::error::Error<&str>>> {
-    terminated(delimited(multispace0, parse_expression, multispace0), eof)(input).map(|res| res.1)
+pub fn parse(input: &str) -> IResult<&str, Expression> {
+    terminated(delimited(multispace0, parse_expression, multispace0), eof)(input)
 }
 
 #[cfg(test)]

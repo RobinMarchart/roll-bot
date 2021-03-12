@@ -14,6 +14,8 @@ Copyright 2021 Robin Marchart
    limitations under the License.
 */
 
+use std::fmt;
+
 #[cfg(feature = "serde-support")]
 use serde::{Deserialize, Serialize};
 
@@ -25,11 +27,33 @@ pub enum DiceType {
     Multiply(u32),
 }
 
+impl fmt::Display for DiceType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DiceType::Number(n) => {
+                write!(f, "d{}", n)
+            }
+            DiceType::Fudge => {
+                write!(f, "dF")
+            }
+            DiceType::Multiply(n) => {
+                write!(f, "d{}x", n)
+            }
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(feature = "serde-support", derive(Serialize, Deserialize))]
 pub struct Dice {
     pub throws: u32,
     pub dice: DiceType,
+}
+
+impl fmt::Display for Dice {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}{}", self.throws, self.dice)
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -42,11 +66,46 @@ pub enum Filter {
     NotEq,
 }
 
+impl fmt::Display for Filter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Filter::Bigger => {
+                write!(f, ">")
+            }
+            Filter::BiggerEq => {
+                write!(f, ">=")
+            }
+            Filter::Smaller => {
+                write!(f, "<")
+            }
+            Filter::SmallerEq => {
+                write!(f, "<=")
+            }
+            Filter::NotEq => {
+                write!(f, "!=")
+            }
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(feature = "serde-support", derive(Serialize, Deserialize))]
 pub enum FilteredDice {
     Simple(Dice),
     Filtered(Dice, Filter, u32),
+}
+
+impl fmt::Display for FilteredDice {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FilteredDice::Simple(d) => {
+                write!(f, "{}", d)
+            }
+            FilteredDice::Filtered(d, fil, n) => {
+                write!(f, "{}{}{}", d, fil, n)
+            }
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -56,11 +115,37 @@ pub enum Selector {
     Lower,
 }
 
+impl fmt::Display for Selector {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Selector::Higher => {
+                write!(f, "h")
+            }
+            Selector::Lower => {
+                write!(f, "l")
+            }
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[cfg_attr(feature = "serde-support", derive(Serialize, Deserialize))]
 pub enum SelectedDice {
     Unchanged(FilteredDice),
     Selected(FilteredDice, Selector, u32),
+}
+
+impl fmt::Display for SelectedDice {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SelectedDice::Unchanged(d) => {
+                write!(f, "{}", d)
+            }
+            SelectedDice::Selected(d, s, n) => {
+                write!(f, "{}{}{}", d, s, n)
+            }
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -72,6 +157,25 @@ pub enum Operation {
     Sub,
 }
 
+impl fmt::Display for Operation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Operation::Mul => {
+                write!(f, "*")
+            }
+            Operation::Div => {
+                write!(f, "/")
+            }
+            Operation::Add => {
+                write!(f, "+")
+            }
+            Operation::Sub => {
+                write!(f, "-")
+            }
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Clone)]
 #[cfg_attr(feature = "serde-support", derive(Serialize, Deserialize))]
 pub enum Term {
@@ -81,9 +185,41 @@ pub enum Term {
     SubTerm(Box<Term>),
 }
 
+impl fmt::Display for Term {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Term::Constant(c) => {
+                write!(f, "{}", c)
+            }
+            Term::DiceThrow(d) => {
+                write!(f, "{}", d)
+            }
+            Term::Calculation(l, op, r) => {
+                write!(f, "{} {} {}", l, op, r)
+            }
+            Term::SubTerm(t) => {
+                write!(f, "({})", t)
+            }
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Clone)]
 #[cfg_attr(feature = "serde-support", derive(Serialize, Deserialize))]
 pub enum Expression {
     Simple(Term),
     List(u32, Term),
+}
+
+impl fmt::Display for Expression {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Expression::Simple(t) => {
+                write!(f, "{}", t)
+            }
+            Expression::List(n, t) => {
+                write!(f, "{}{{{}}}", n, t)
+            }
+        }
+    }
 }
