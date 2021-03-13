@@ -11,12 +11,13 @@ use std::{
     sync::{atomic::AtomicBool, Arc},
     time::Duration,
 };
-use threadpool::{Builder, ThreadPool};
 use tokio::{
     sync::{mpsc, oneshot},
     task::spawn,
     time::{interval, sleep, sleep_until, Instant},
 };
+
+use rusty_pool::{Builder, ThreadPool};
 
 #[derive(Debug)]
 enum RngProviderOps {
@@ -81,12 +82,13 @@ pub struct RollExecutor {
     rng_gen: mpsc::Sender<RngProviderOps>,
 }
 impl RollExecutor {
-    pub async fn new(size: usize, timeout: Duration) -> RollExecutor {
+    pub async fn new(size: u32, timeout: Duration) -> RollExecutor {
         let rng = start_rng_provider(timeout).await;
         RollExecutor {
             pool: Builder::new()
-                .num_threads(size)
-                .thread_name("Roll Worker".to_string())
+                .core_size(1)
+                .max_size(size)
+                .name("Roll Worker".to_string())
                 .build(),
             timeout,
             rng_gen: rng,

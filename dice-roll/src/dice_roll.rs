@@ -18,7 +18,7 @@ use crate::dice_types::*;
 use rand::{distributions::Uniform, Rng};
 use std::convert::TryInto;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum EvaluationErrors {
     DivideByZero,
     Timeout,

@@ -20,18 +20,22 @@ pub mod storage;
 
 use async_trait::async_trait;
 use std::path::Path;
+use std::sync::Arc;
 use storage::StorageHandle;
 
-pub struct ClientUtils<'g, Id: storage::ClientId> {
-    global: &'g GlobalUtils,
+pub struct ClientUtils<Id: storage::ClientId> {
+    global: Arc<GlobalUtils>,
     store: StorageHandle<Id>,
 }
 
+pub use robins_dice_roll::dice_roll::EvaluationErrors;
+
+#[derive(Debug, PartialEq, Eq)]
 pub enum CommandResult {
     Help,
     RollHelp,
     Info,
-    SetCommandPrefix,
+    SetCommandPrefix(String),
     GetCommandPrefix(String),
     AddRollPrefix(Result<(), ()>),
     RemoveRollPrefix(Result<(), ()>),
@@ -39,27 +43,24 @@ pub enum CommandResult {
     AddAlias,
     RemoveAlias(Result<(), ()>),
     ListAlias(Vec<(String, String)>),
-    Roll(
-        Result<Vec<(i64, Vec<i64>)>, robins_dice_roll::dice_roll::EvaluationErrors>,
-        String,
-    ),
+    Roll(Result<Vec<(i64, Vec<i64>)>, EvaluationErrors>, String),
 }
 
-impl<'g, Id: storage::ClientId> ClientUtils<'g, Id> {
-    pub async fn new(global: &'g GlobalUtils, name: &str) -> std::io::Result<ClientUtils<'g, Id>> {
+impl<Id: storage::ClientId> ClientUtils<Id> {
+    pub async fn new(global: Arc<GlobalUtils>, name: &str) -> std::io::Result<ClientUtils<Id>> {
         let store: StorageHandle<Id> =
             storage::StorageHandle::new(global.base_path.join(name).into_boxed_path()).await?;
         Ok(ClientUtils { global, store })
     }
     pub async fn eval(&self, id: Id, message: &str) -> Option<CommandResult> {
-        match commands::parse(message, id.clone(), &self.store).await {
+        match commands::parse_logging(message, id.clone(), &self.store).await {
             Some(command) => Some(match command {
                 commands::Command::Help => CommandResult::Help,
                 commands::Command::RollHelp => CommandResult::RollHelp,
                 commands::Command::Info => CommandResult::Info,
                 commands::Command::SetCommandPrefix(prefix) => {
-                    self.store.set_command_prefix(id, prefix).await;
-                    CommandResult::SetCommandPrefix
+                    self.store.set_command_prefix(id, prefix.clone()).await;
+                    CommandResult::SetCommandPrefix(prefix)
                 }
                 commands::Command::GetCommandPrefix => {
                     CommandResult::GetCommandPrefix(self.store.get_command_prefix(id).await)
@@ -102,6 +103,19 @@ impl<'g, Id: storage::ClientId> ClientUtils<'g, Id> {
     }
 }
 
+impl GlobalUtils {
+    pub async fn new(
+        path: Box<Path>,
+        roll_timeout: std::time::Duration,
+        roll_workers: u32,
+    ) -> GlobalUtils {
+        GlobalUtils {
+            roller: rolls::RollExecutor::new(roll_workers, roll_timeout).await,
+            base_path: path,
+        }
+    }
+}
+
 pub struct GlobalUtils {
     roller: rolls::RollExecutor,
     base_path: Box<Path>,
@@ -109,5 +123,5 @@ pub struct GlobalUtils {
 
 #[async_trait]
 pub trait Bot {
-    async fn run(&self, utils: &GlobalUtils);
+    async fn run(&self, utils: Arc<GlobalUtils>);
 }

@@ -5,14 +5,14 @@ use nom::{
     character::complete::{multispace0, multispace1, satisfy},
     combinator::{eof, map, recognize, success},
     multi::many1,
-    sequence::{pair, preceded, terminated},
+    sequence::{delimited, pair, preceded, terminated},
     IResult,
 };
 use robins_dice_roll::{dice_types::Expression, parser::roll};
 use std::sync::Arc;
 use unicode_xid::UnicodeXID;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Help,
     RollHelp,
@@ -30,7 +30,20 @@ pub enum Command {
 }
 
 fn chars_set(input: &str) -> IResult<&str, char> {
-    satisfy(|c| UnicodeXID::is_xid_start(c))(input)
+    satisfy(|c| {
+        UnicodeXID::is_xid_start(c)
+            || c == '!'
+            || c == '$'
+            || c == '§'
+            || c == '%'
+            || c == '&'
+            || c == '/'
+            || c == '('
+            || c == ')'
+            || c == '='
+            || c == '?'
+            || c == '|'
+    })(input)
 }
 
 fn parse_help(input: &str) -> IResult<&str, Command> {
@@ -97,7 +110,7 @@ fn parse_roll_prefix(input: &str) -> IResult<&str, Command> {
             }),
             map(
                 preceded(
-                    pair(alt((tag_no_case("set"), tag_no_case("s"))), multispace1),
+                    pair(alt((tag_no_case("add"), tag_no_case("a"))), multispace1),
                     recognize(many1(chars_set)),
                 ),
                 |s| Command::AddRollPrefix(s.to_owned()),
@@ -116,7 +129,7 @@ fn parse_roll_prefix(input: &str) -> IResult<&str, Command> {
 fn parse_roll_command(input: &str) -> IResult<&str, Command> {
     preceded(
         pair(alt((tag_no_case("roll"), tag_no_case("r"))), multispace1),
-        map(roll::parse, |e| Command::Roll(e)),
+        map(roll::parse_expression, |e| Command::Roll(e)),
     )(input)
 }
 
@@ -129,7 +142,7 @@ fn parse_alias(input: &str) -> IResult<&str, Command> {
                 map(
                     pair(
                         terminated(recognize(many1(chars_set)), multispace1),
-                        roll::parse,
+                        roll::parse_expression,
                     ),
                     |(alias, expr)| Command::AddAlias(alias.to_owned(), expr),
                 ),
@@ -150,7 +163,7 @@ fn parse_alias(input: &str) -> IResult<&str, Command> {
 fn parse_command<'a>(input: &'a str, prefix: &str) -> IResult<&'a str, Command> {
     terminated(
         preceded(
-            pair(tag(prefix), multispace1),
+            pair(tag(prefix), multispace0),
             alt((
                 parse_help,
                 parse_roll_help,
@@ -167,9 +180,14 @@ fn parse_command<'a>(input: &'a str, prefix: &str) -> IResult<&'a str, Command> 
 }
 
 fn parse_roll<'a>(input: &'a str, prefix: &str) -> IResult<&'a str, Command> {
-    map(preceded(pair(tag(prefix), multispace0), roll::parse), |e| {
-        Command::Roll(e)
-    })(input)
+    map(
+        delimited(
+            pair(tag(prefix), multispace0),
+            roll::parse_expression,
+            pair(multispace0, eof),
+        ),
+        |e| Command::Roll(e),
+    )(input)
 }
 
 pub async fn parse<Id: ClientId>(
@@ -192,5 +210,37 @@ pub async fn parse<Id: ClientId>(
             .get_alias(id.clone(), string.trim().to_owned())
             .await
             .map(|e| Command::AliasRoll(e))
+    }
+}
+
+pub async fn parse_logging<Id: ClientId>(
+    string: &str,
+    id: Id,
+    store: &StorageHandle<Id>,
+) -> Option<Command> {
+    let command = parse(string, id, store).await;
+    log::info!("{:?}", &command);
+    command
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use robins_dice_roll::dice_types::Term;
+
+    #[test]
+    fn test_parse_command() {
+        assert_eq!(
+            parse_command("! roll 1", "!"),
+            Ok(("", Command::Roll(Expression::Simple(Term::Constant(1)))))
+        );
+        assert_eq!(
+            parse_command("!cp set !", "!"),
+            Ok(("", Command::SetCommandPrefix("!".to_string())))
+        );
+        assert_eq!(
+            parse_command("ürp set ä", "ü"),
+            Ok(("", Command::AddRollPrefix("ä".to_string())))
+        )
     }
 }

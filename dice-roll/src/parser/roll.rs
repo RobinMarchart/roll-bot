@@ -22,7 +22,7 @@ use nom::{
     branch::alt,
     bytes::complete::{tag, tag_no_case},
     character::complete::{digit1, multispace0},
-    combinator::{eof, map, map_res, recognize, success, verify},
+    combinator::{map, map_res, recognize, success, verify},
     error::context,
     sequence::{delimited, pair, preceded, terminated, tuple},
     IResult,
@@ -208,10 +208,6 @@ pub fn parse_expression(input: &str) -> IResult<&str, Expression> {
             |list| Expression::List(list.0, list.1),
         ),
     ))(input)
-}
-
-pub fn parse(input: &str) -> IResult<&str, Expression> {
-    terminated(delimited(multispace0, parse_expression, multispace0), eof)(input)
 }
 
 #[cfg(test)]
