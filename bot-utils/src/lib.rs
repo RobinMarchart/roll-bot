@@ -44,6 +44,7 @@ pub enum CommandResult {
     RemoveAlias(Result<(), ()>),
     ListAlias(Vec<(String, String)>),
     Roll(Result<Vec<(i64, Vec<i64>)>, EvaluationErrors>, String),
+    InsufficentPermission,
 }
 
 impl<Id: storage::ClientId> ClientUtils<Id> {
@@ -52,21 +53,34 @@ impl<Id: storage::ClientId> ClientUtils<Id> {
             storage::StorageHandle::new(global.base_path.join(name).into_boxed_path()).await?;
         Ok(ClientUtils { global, store })
     }
-    pub async fn eval(&self, id: Id, message: &str) -> Option<CommandResult> {
+    pub async fn eval<F: std::future::Future<Output = bool>, Fn: std::ops::FnOnce() -> F>(
+        &self,
+        id: Id,
+        message: &str,
+        check_permission: Fn,
+    ) -> Option<CommandResult> {
         match commands::parse_logging(message, id.clone(), &self.store).await {
             Some(command) => Some(match command {
                 commands::Command::Help => CommandResult::Help,
                 commands::Command::RollHelp => CommandResult::RollHelp,
                 commands::Command::Info => CommandResult::Info,
                 commands::Command::SetCommandPrefix(prefix) => {
-                    self.store.set_command_prefix(id, prefix.clone()).await;
-                    CommandResult::SetCommandPrefix(prefix)
+                    if check_permission().await {
+                        self.store.set_command_prefix(id, prefix.clone()).await;
+                        CommandResult::SetCommandPrefix(prefix)
+                    } else {
+                        CommandResult::InsufficentPermission
+                    }
                 }
                 commands::Command::GetCommandPrefix => {
                     CommandResult::GetCommandPrefix(self.store.get_command_prefix(id).await)
                 }
                 commands::Command::AddRollPrefix(prefix) => {
-                    CommandResult::AddRollPrefix(self.store.add_roll_prefix(id, prefix).await)
+                    if check_permission().await {
+                        CommandResult::AddRollPrefix(self.store.add_roll_prefix(id, prefix).await)
+                    } else {
+                        CommandResult::InsufficentPermission
+                    }
                 }
                 commands::Command::RemoveRollPrefix(prefix) => {
                     CommandResult::RemoveRollPrefix(self.store.remove_roll_prefix(id, prefix).await)
