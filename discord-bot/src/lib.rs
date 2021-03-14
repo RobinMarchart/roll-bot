@@ -2,11 +2,12 @@ use bot_utils::{Bot, ClientUtils, CommandResult, GlobalUtils};
 
 use serenity::{
     client::ClientBuilder,
-    framework::Framework,
     model::{
-        channel::{Channel, Message},
+        channel::Message,
+        event::Event,
         id::{GuildId, UserId},
     },
+    prelude::RawEventHandler,
 };
 
 use async_trait::async_trait;
@@ -59,7 +60,7 @@ impl Bot for DiscordBot {
         };
 
         let mut client = ClientBuilder::new(token)
-            .framework(handler)
+            .raw_event_handler(handler)
             .await
             .expect("Error creating Client");
         log::info!("created client");
@@ -195,31 +196,30 @@ async fn respond(
 }
 
 #[async_trait]
-impl Framework for DiscordBotHandler {
-    async fn dispatch(
-        &self,
-        context: serenity::client::Context,
-        message: serenity::model::channel::Message,
-    ) {
-        if (message.author.bot) {
-        } else if let Some(guild) = message.guild_id {
-            if let Some(response) = self
-                .guild_utils
-                .eval(guild.clone(), message.content.as_str())
-                .await
-            {
-                log::info!("{:?}", &response);
-                respond(context, message, response).await
+impl RawEventHandler for DiscordBotHandler {
+    async fn raw_event(&self, ctx: serenity::client::Context, ev: Event) {
+        match ev {
+            Event::MessageCreate(event) => {
+                if event.message.author.bot {
+                } else if let Some(guild) = event.message.guild_id {
+                    if let Some(response) = self
+                        .guild_utils
+                        .eval(guild.clone(), &event.message.content)
+                        .await
+                    {
+                        respond(ctx, event.message, response).await;
+                    }
+                } else {
+                    if let Some(response) = self
+                        .dm_utils
+                        .eval(event.message.author.id.clone(), &event.message.content)
+                        .await
+                    {
+                        respond(ctx, event.message, response).await;
+                    }
+                }
             }
-        } else if let Some(Channel::Private(dm_channel)) = message.channel(&context).await {
-            if let Some(response) = self
-                .dm_utils
-                .eval(dm_channel.recipient.id.clone(), message.content.as_str())
-                .await
-            {
-                log::info!("{:?}", &response);
-                respond(context, message, response).await
-            }
+            _ => {}
         }
     }
 }

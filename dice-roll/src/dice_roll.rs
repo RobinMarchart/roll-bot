@@ -261,7 +261,7 @@ impl ExpressionEvaluate for Expression {
             Expression::List(count, term) => {
                 let size: usize = (*count).try_into().expect("failed to convert u32 to usize");
                 let mut result_collector: Vec<(i64, Vec<i64>)> = Vec::with_capacity(size);
-                for index in 0..size {
+                for _ in 0..size {
                     result_collector.push(term.evaluate(timeout_f, rng)?);
                 }
                 Ok(result_collector)
