@@ -18,6 +18,9 @@ use crate::dice_types::*;
 use rand::{distributions::Uniform, Rng};
 use std::convert::TryInto;
 
+#[cfg(feature = "logging")]
+use log::debug;
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum EvaluationErrors {
     DivideByZero,
@@ -47,38 +50,45 @@ impl DiceEvaluate for Dice {
         match self.dice {
             DiceType::Number(faces) => {
                 let dist = Uniform::new_inclusive(1, faces as i64);
-                for roll in rolls.iter_mut() {
+                for _ in 0..self.throws {
                     roll_counter = roll_counter.wrapping_add(1);
                     if roll_counter == 0 && timeout_f() {
                         return Err(EvaluationErrors::Timeout);
                     }
-                    *roll = rng.sample::<i64, _>(dist);
+                    rolls.push(rng.sample::<i64, _>(dist));
                 }
             }
             DiceType::Fudge => {
                 let dist: Uniform<i64> = Uniform::new_inclusive(-1, 1);
-                for roll in rolls.iter_mut() {
+                for _ in 0..self.throws {
                     roll_counter = roll_counter.wrapping_add(1);
                     if roll_counter == 0 && timeout_f() {
                         return Err(EvaluationErrors::Timeout);
                     }
-                    *roll = rng.sample(dist);
+                    rolls.push(rng.sample(dist));
                 }
             }
             DiceType::Multiply(base_faces) => {
                 let dist = Uniform::new_inclusive(1, base_faces as i64);
-                for roll in rolls.iter_mut() {
+                for _ in 0..self.throws {
                     roll_counter = roll_counter.wrapping_add(1);
                     if roll_counter == 0 && timeout_f() {
                         return Err(EvaluationErrors::Timeout);
                     }
-                    *roll = rng
-                        .sample(dist)
-                        .checked_mul(rng.sample(dist))
-                        .ok_or(EvaluationErrors::Overflow)?;
+                    rolls.push(
+                        rng.sample(dist)
+                            .checked_mul(rng.sample(dist))
+                            .ok_or(EvaluationErrors::Overflow)?,
+                    );
                 }
             }
-        };
+        }
+
+        #[cfg(feature = "logging")]
+        {
+            debug!("Dice roll result for {} is {:?}", &self, &rolls);
+        }
+
         let rolls_copy = rolls.clone();
         Ok((rolls, rolls_copy))
     }
@@ -90,7 +100,7 @@ impl DiceEvaluate for FilteredDice {
         timeout_f: &mut T,
         rng: &mut R,
     ) -> Result<(Vec<i64>, Vec<i64>), EvaluationErrors> {
-        match self {
+        let result = match self {
             FilteredDice::Simple(dice) => dice.evaluate(timeout_f, rng),
             FilteredDice::Filtered(dice, filter, target) => {
                 dice.evaluate(timeout_f, rng).map(|original| {
@@ -125,7 +135,12 @@ impl DiceEvaluate for FilteredDice {
                     )
                 })
             }
+        };
+        #[cfg(feature = "logging")]
+        {
+            debug!("rolled {:?} for filtered dice {}", &result, &self)
         }
+        result
     }
 }
 
@@ -135,7 +150,7 @@ impl DiceEvaluate for SelectedDice {
         timeout_f: &mut T,
         rng: &mut R,
     ) -> Result<(Vec<i64>, Vec<i64>), EvaluationErrors> {
-        match self {
+        let result = match self {
             SelectedDice::Unchanged(dice) => dice.evaluate(timeout_f, rng),
             SelectedDice::Selected(dice, selector, max_size) => {
                 dice.evaluate(timeout_f, rng)
@@ -153,7 +168,12 @@ impl DiceEvaluate for SelectedDice {
                         }
                     })
             }
+        };
+        #[cfg(feature = "logging")]
+        {
+            debug!("rolled {:?} for selected dice {}", &result, &self)
         }
+        result
     }
 }
 
@@ -171,7 +191,7 @@ impl TermEvaluate for Term {
         timeout_f: &mut T,
         rng: &mut R,
     ) -> Result<(i64, Vec<i64>), EvaluationErrors> {
-        match self {
+        let result = match self {
             Term::Constant(i) => Ok((i.to_owned(), Vec::new())),
             Term::DiceThrow(dice) => dice.evaluate(timeout_f, rng).map(|roll_results| {
                 (
@@ -203,7 +223,12 @@ impl TermEvaluate for Term {
                 }?;
                 Ok((result, [left_r.1, right_r.1].concat()))
             }
+        };
+        #[cfg(feature = "logging")]
+        {
+            debug!("got {:?} for term {}", &result, &self)
         }
+        result
     }
 }
 
@@ -237,7 +262,7 @@ impl ExpressionEvaluate for Expression {
                 let size: usize = (*count).try_into().expect("failed to convert u32 to usize");
                 let mut result_collector: Vec<(i64, Vec<i64>)> = Vec::with_capacity(size);
                 for index in 0..size {
-                    *(result_collector.get_mut(index).unwrap()) = term.evaluate(timeout_f, rng)?;
+                    result_collector.push(term.evaluate(timeout_f, rng)?);
                 }
                 Ok(result_collector)
             }

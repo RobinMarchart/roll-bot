@@ -14,15 +14,16 @@ repository = "https://github.com/RobinMarchart/roll-bot"
 rand = {version = "^0.8.3", optional=true}
 nom = {version = "^6.1.2", optional=true}
 serde = {version = "^1.0.124", optional=true}
+log = {version = "^0.4.14", optional=true}
 
 [features]
 
-default = ["parser", "roll", "serde-support"]
+default = ["parser", "roll", "serde","logging"]
 
 parser = ["nom"]
 
 roll = ["rand"]
 
-serde-support = ["serde"]
+logging = ["log", "rand/log"]
 
 

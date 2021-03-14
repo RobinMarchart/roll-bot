@@ -8,9 +8,9 @@ use nom::{
     sequence::{delimited, pair, preceded, terminated},
     IResult,
 };
-use robins_dice_roll::{dice_types::Expression, parser::roll};
+use robins_dice_roll::{dice_types::Expression, parser};
 use std::sync::Arc;
-use unicode_xid::UnicodeXID;
+use unicode_categories::UnicodeCategories;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
@@ -30,20 +30,7 @@ pub enum Command {
 }
 
 fn chars_set(input: &str) -> IResult<&str, char> {
-    satisfy(|c| {
-        UnicodeXID::is_xid_start(c)
-            || c == '!'
-            || c == '$'
-            || c == '§'
-            || c == '%'
-            || c == '&'
-            || c == '/'
-            || c == '('
-            || c == ')'
-            || c == '='
-            || c == '?'
-            || c == '|'
-    })(input)
+    satisfy(|c| !(c.is_separator() || c.is_other()))(input)
 }
 
 fn parse_help(input: &str) -> IResult<&str, Command> {
@@ -128,8 +115,8 @@ fn parse_roll_prefix(input: &str) -> IResult<&str, Command> {
 
 fn parse_roll_command(input: &str) -> IResult<&str, Command> {
     preceded(
-        pair(alt((tag_no_case("roll"), tag_no_case("r"))), multispace1),
-        map(roll::parse_expression, |e| Command::Roll(e)),
+        pair(alt((tag_no_case("roll"), tag_no_case("r"))), multispace0),
+        map(parser::parse_expression, |e| Command::Roll(e)),
     )(input)
 }
 
@@ -142,7 +129,7 @@ fn parse_alias(input: &str) -> IResult<&str, Command> {
                 map(
                     pair(
                         terminated(recognize(many1(chars_set)), multispace1),
-                        roll::parse_expression,
+                        parser::parse_expression,
                     ),
                     |(alias, expr)| Command::AddAlias(alias.to_owned(), expr),
                 ),
@@ -161,21 +148,24 @@ fn parse_alias(input: &str) -> IResult<&str, Command> {
 }
 
 fn parse_command<'a>(input: &'a str, prefix: &str) -> IResult<&'a str, Command> {
-    terminated(
-        preceded(
-            pair(tag(prefix), multispace0),
-            alt((
-                parse_help,
-                parse_roll_help,
-                parse_info,
-                parse_command_prefix,
-                parse_roll_prefix,
-                parse_alias,
-                parse_roll_command,
-                success(Command::Help),
-            )),
-        ),
-        pair(multispace0, eof),
+    preceded(
+        tag(prefix),
+        alt((
+            delimited(
+                multispace0,
+                alt((
+                    parse_help,
+                    parse_roll_help,
+                    parse_info,
+                    parse_command_prefix,
+                    parse_roll_prefix,
+                    parse_alias,
+                    parse_roll_command,
+                )),
+                pair(multispace0, eof),
+            ),
+            success(Command::Help),
+        )),
     )(input)
 }
 
@@ -183,7 +173,7 @@ fn parse_roll<'a>(input: &'a str, prefix: &str) -> IResult<&'a str, Command> {
     map(
         delimited(
             pair(tag(prefix), multispace0),
-            roll::parse_expression,
+            parser::parse_expression,
             pair(multispace0, eof),
         ),
         |e| Command::Roll(e),
@@ -226,7 +216,7 @@ pub async fn parse_logging<Id: ClientId>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use robins_dice_roll::dice_types::Term;
+    use robins_dice_roll::dice_types::*;
 
     #[test]
     fn test_parse_command() {
@@ -239,8 +229,29 @@ mod tests {
             Ok(("", Command::SetCommandPrefix("!".to_string())))
         );
         assert_eq!(
-            parse_command("ürp set ä", "ü"),
+            parse_command("ü rp add ä", "ü"),
             Ok(("", Command::AddRollPrefix("ä".to_string())))
-        )
+        );
+
+        assert_eq!(
+            parse_command("! r 1d4", "!"),
+            Ok((
+                "",
+                Command::Roll(Expression::Simple(Term::DiceThrow(
+                    SelectedDice::Unchanged(FilteredDice::Simple(Dice {
+                        throws: 1,
+                        dice: DiceType::Number(4)
+                    }))
+                )))
+            ))
+        );
+    }
+
+    #[test]
+    fn test_chars_set() {
+        assert_eq!(chars_set("ä"), Ok(("", 'ä')));
+        assert_eq!(chars_set(":"), Ok(("", ':')));
+        assert_eq!(chars_set("$"), Ok(("", '$')));
+        assert_eq!(chars_set("✅"), Ok(("", '✅')));
     }
 }

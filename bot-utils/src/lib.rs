@@ -108,9 +108,10 @@ impl GlobalUtils {
         path: Box<Path>,
         roll_timeout: std::time::Duration,
         roll_workers: u32,
+        rng_reseed: std::time::Duration,
     ) -> GlobalUtils {
         GlobalUtils {
-            roller: rolls::RollExecutor::new(roll_workers, roll_timeout).await,
+            roller: rolls::RollExecutor::new(roll_workers, roll_timeout, rng_reseed).await,
             base_path: path,
         }
     }

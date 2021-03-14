@@ -1,9 +1,6 @@
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() {
-    simple_logger::SimpleLogger::from_env()
-        .with_module_level("tracing::span", log::LevelFilter::Warn)
-        .init()
-        .unwrap();
+    pretty_env_logger::init();
     log::info!("logger created");
     Bots::new()
         .await
@@ -32,6 +29,7 @@ impl Bots {
                     .into_boxed_path(),
                     std::time::Duration::from_secs(2),
                     4,
+                    std::time::Duration::from_secs(300),
                 )
                 .await,
             ),

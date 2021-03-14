@@ -201,7 +201,8 @@ impl Framework for DiscordBotHandler {
         context: serenity::client::Context,
         message: serenity::model::channel::Message,
     ) {
-        if let Some(guild) = message.guild_id {
+        if (message.author.bot) {
+        } else if let Some(guild) = message.guild_id {
             if let Some(response) = self
                 .guild_utils
                 .eval(guild.clone(), message.content.as_str())

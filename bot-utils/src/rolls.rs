@@ -82,8 +82,8 @@ pub struct RollExecutor {
     rng_gen: mpsc::Sender<RngProviderOps>,
 }
 impl RollExecutor {
-    pub async fn new(size: u32, timeout: Duration) -> RollExecutor {
-        let rng = start_rng_provider(timeout).await;
+    pub async fn new(size: u32, timeout: Duration, rng_reseed: Duration) -> RollExecutor {
+        let rng = start_rng_provider(rng_reseed).await;
         RollExecutor {
             pool: Builder::new()
                 .core_size(1)

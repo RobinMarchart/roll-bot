@@ -16,11 +16,11 @@ Copyright 2021 Robin Marchart
 
 use std::fmt;
 
-#[cfg(feature = "serde-support")]
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-#[cfg_attr(feature = "serde-support", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum DiceType {
     Number(u32),
     Fudge,
@@ -44,7 +44,7 @@ impl fmt::Display for DiceType {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-#[cfg_attr(feature = "serde-support", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Dice {
     pub throws: u32,
     pub dice: DiceType,
@@ -57,7 +57,7 @@ impl fmt::Display for Dice {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-#[cfg_attr(feature = "serde-support", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Filter {
     Bigger,
     BiggerEq,
@@ -89,7 +89,7 @@ impl fmt::Display for Filter {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-#[cfg_attr(feature = "serde-support", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum FilteredDice {
     Simple(Dice),
     Filtered(Dice, Filter, u32),
@@ -109,7 +109,7 @@ impl fmt::Display for FilteredDice {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-#[cfg_attr(feature = "serde-support", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Selector {
     Higher,
     Lower,
@@ -129,7 +129,7 @@ impl fmt::Display for Selector {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-#[cfg_attr(feature = "serde-support", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum SelectedDice {
     Unchanged(FilteredDice),
     Selected(FilteredDice, Selector, u32),
@@ -149,7 +149,7 @@ impl fmt::Display for SelectedDice {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-#[cfg_attr(feature = "serde-support", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Operation {
     Mul,
     Div,
@@ -177,7 +177,7 @@ impl fmt::Display for Operation {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-#[cfg_attr(feature = "serde-support", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Term {
     Constant(i64),
     DiceThrow(SelectedDice),
@@ -205,7 +205,7 @@ impl fmt::Display for Term {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-#[cfg_attr(feature = "serde-support", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Expression {
     Simple(Term),
     List(u32, Term),
