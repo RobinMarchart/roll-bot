@@ -12,6 +12,10 @@ bot-utils = {path = "bot-utils"}
 tokio = {version="^1.3.0", features=["rt","parking_lot","rt-multi-thread","rt","macros"]}
 log = "^0.4.14"
 pretty_env_logger = "0.4.0"
+toml = "0.5.8"
 
 [workspace]
 members = ["dice-roll", "discord-bot","bot-utils"]
+
+[profile.release]
+panic = 'abort'

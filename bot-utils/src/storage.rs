@@ -130,9 +130,9 @@ impl<Id: ClientId> Storage<Id> {
         spawn(async move {
             let id: Id = id_clone;
             let hashed_id = hex::encode(hash_id(&id));
-            let path = Box::new(path_clone.deref().join(hashed_id + ".cbor"));
+            let path = Box::new(path_clone.deref().join(hashed_id + ".toml"));
             let client_info = match fs::read(path.clone().deref()).await {
-                Ok(content) => match serde_cbor::from_slice(&content) {
+                Ok(content) => match toml::from_slice(&content) {
                     Ok(info) => info,
                     Err(e) => {
                         log::warn!("Parsing client information for {:?} from {:?} resulted in Error {}.\n Using default values",&id,path.deref(),e);
@@ -356,8 +356,8 @@ fn create_write_handler<Id: ClientId>(
         loop {
             match receiver.recv().await {
                 Some((id, value)) => {
-                    let path = base_path.join(hex::encode(hash_id(&id)) + ".cbor");
-                    match serde_cbor::to_vec(&value) {
+                    let path = base_path.join(hex::encode(hash_id(&id)) + ".toml");
+                    match toml::to_vec(&value) {
                         Ok(val) => match fs::write(path, val).await {
                             Ok(_) => {}
                             Err(e) => {

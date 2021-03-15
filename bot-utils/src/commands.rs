@@ -24,7 +24,7 @@ pub enum Command {
     ListRollPrefix,
     AddAlias(String, Expression),
     RemoveAlias(String),
-    ListAlias,
+    ListAliases,
     AliasRoll(Arc<Expression>),
     Roll(Expression),
 }
@@ -141,7 +141,7 @@ fn parse_alias(input: &str) -> IResult<&str, Command> {
                 }),
             ),
             map(alt((tag_no_case("list"), tag_no_case("l"))), |_| {
-                Command::ListAlias
+                Command::ListAliases
             }),
         )),
     )(input)

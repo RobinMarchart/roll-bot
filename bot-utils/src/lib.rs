@@ -19,7 +19,7 @@ pub mod rolls;
 pub mod storage;
 
 use async_trait::async_trait;
-use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 use storage::StorageHandle;
 
@@ -42,7 +42,7 @@ pub enum CommandResult {
     ListRollPrefix(Vec<String>),
     AddAlias,
     RemoveAlias(Result<(), ()>),
-    ListAlias(Vec<(String, String)>),
+    ListAliases(Vec<(String, String)>),
     Roll(Result<Vec<(i64, Vec<i64>)>, EvaluationErrors>, String),
     InsufficentPermission,
 }
@@ -83,19 +83,33 @@ impl<Id: storage::ClientId> ClientUtils<Id> {
                     }
                 }
                 commands::Command::RemoveRollPrefix(prefix) => {
-                    CommandResult::RemoveRollPrefix(self.store.remove_roll_prefix(id, prefix).await)
+                    if check_permission().await {
+                        CommandResult::RemoveRollPrefix(
+                            self.store.remove_roll_prefix(id, prefix).await,
+                        )
+                    } else {
+                        CommandResult::InsufficentPermission
+                    }
                 }
                 commands::Command::ListRollPrefix => {
                     CommandResult::ListRollPrefix(self.store.get_roll_prefixes(id).await)
                 }
                 commands::Command::AddAlias(alias, expression) => {
-                    self.store.set_alias(id, alias, expression).await;
-                    CommandResult::AddAlias
+                    if check_permission().await {
+                        self.store.set_alias(id, alias, expression).await;
+                        CommandResult::AddAlias
+                    } else {
+                        CommandResult::InsufficentPermission
+                    }
                 }
                 commands::Command::RemoveAlias(alias) => {
-                    CommandResult::RemoveAlias(self.store.remove_alias(id, alias).await)
+                    if check_permission().await {
+                        CommandResult::RemoveAlias(self.store.remove_alias(id, alias).await)
+                    } else {
+                        CommandResult::InsufficentPermission
+                    }
                 }
-                commands::Command::ListAlias => CommandResult::ListAlias(
+                commands::Command::ListAliases => CommandResult::ListAliases(
                     self.store
                         .get_all_alias(id)
                         .await
@@ -119,7 +133,7 @@ impl<Id: storage::ClientId> ClientUtils<Id> {
 
 impl GlobalUtils {
     pub async fn new(
-        path: Box<Path>,
+        path: PathBuf,
         roll_timeout: std::time::Duration,
         roll_workers: u32,
         rng_reseed: std::time::Duration,
@@ -133,10 +147,11 @@ impl GlobalUtils {
 
 pub struct GlobalUtils {
     roller: rolls::RollExecutor,
-    base_path: Box<Path>,
+    base_path: PathBuf,
 }
 
 #[async_trait]
 pub trait Bot {
     async fn run(&self, utils: Arc<GlobalUtils>);
+    fn config(&mut self, config: &mut std::collections::HashMap<String, toml::Value>) -> bool;
 }
