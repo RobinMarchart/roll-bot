@@ -184,8 +184,10 @@ pub async fn parse<Id: ClientId>(
     string: &str,
     id: Id,
     store: &StorageHandle<Id>,
-) -> Option<Command> {
-    if let Ok((_, c)) = parse_command(string, &store.get_command_prefix(id.clone()).await) {
+) -> Option<(Command, String)> {
+    let prefix = store.get_command_prefix(id.clone()).await;
+
+    if let Ok((_, c)) = parse_command(string, &prefix) {
         Some(c)
     } else if let Some(command) = store
         .get_roll_prefixes(id.clone())
@@ -201,13 +203,14 @@ pub async fn parse<Id: ClientId>(
             .await
             .map(|e| Command::AliasRoll(e))
     }
+    .map(|c| (c, prefix))
 }
 
 pub async fn parse_logging<Id: ClientId>(
     string: &str,
     id: Id,
     store: &StorageHandle<Id>,
-) -> Option<Command> {
+) -> Option<(Command, String)> {
     let command = parse(string, id, store).await;
     log::info!("{:?}", &command);
     command

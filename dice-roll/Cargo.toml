@@ -13,7 +13,7 @@ repository = "https://github.com/RobinMarchart/roll-bot"
 [dependencies]
 rand = {version = "^0.8.3", optional=true}
 nom = {version = "^6.1.2", optional=true}
-serde = {version = "^1.0.124", optional=true}
+serde = {version = "^1.0.124", optional=true,features=["derive"]}
 log = {version = "^0.4.14", optional=true}
 
 [features]

@@ -60,7 +60,7 @@ impl<Id: storage::ClientId> ClientUtils<Id> {
         check_permission: Fn,
     ) -> Option<CommandResult> {
         match commands::parse_logging(message, id.clone(), &self.store).await {
-            Some(command) => Some(match command {
+            Some(command) => Some(match command.0 {
                 commands::Command::Help => CommandResult::Help,
                 commands::Command::RollHelp => CommandResult::RollHelp,
                 commands::Command::Info => CommandResult::Info,
@@ -72,9 +72,7 @@ impl<Id: storage::ClientId> ClientUtils<Id> {
                         CommandResult::InsufficentPermission
                     }
                 }
-                commands::Command::GetCommandPrefix => {
-                    CommandResult::GetCommandPrefix(self.store.get_command_prefix(id).await)
-                }
+                commands::Command::GetCommandPrefix => CommandResult::GetCommandPrefix(command.1),
                 commands::Command::AddRollPrefix(prefix) => {
                     if check_permission().await {
                         CommandResult::AddRollPrefix(self.store.add_roll_prefix(id, prefix).await)
@@ -146,7 +144,7 @@ impl GlobalUtils {
 }
 
 pub struct GlobalUtils {
-    roller: rolls::RollExecutor,
+    pub roller: rolls::RollExecutor,
     base_path: PathBuf,
 }
 

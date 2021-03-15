@@ -15,7 +15,7 @@ pretty_env_logger = "0.4.0"
 toml = "0.5.8"
 
 [workspace]
-members = ["dice-roll", "discord-bot","bot-utils"]
+members = ["dice-roll", "discord-bot","bot-utils","roll-cmd"]
 
 [profile.release]
 panic = 'abort'

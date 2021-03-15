@@ -1,0 +1,15 @@
+[package]
+name = "roll-cmd"
+version = "0.1.0"
+authors = ["Robin Marchart <robin.marchart@tum.de>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+robins-dice-roll = {path="../dice-roll"}
+npy = "0.4.0"
+npy-derive = "0.4"
+rand = "^0.8.3"
+rand_xoshiro = "^0.6.0"
+rand_chacha = "^0.3.0"

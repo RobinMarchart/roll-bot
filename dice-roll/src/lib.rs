@@ -15,9 +15,12 @@ Copyright 2021 Robin Marchart
 */
 
 pub mod dice_types;
+pub use dice_types::*;
 
 #[cfg(feature = "roll")]
 pub mod dice_roll;
 
 #[cfg(feature = "parser")]
 pub mod parser;
+
+pub mod limits;
