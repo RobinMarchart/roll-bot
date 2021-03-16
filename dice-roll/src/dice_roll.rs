@@ -157,8 +157,11 @@ impl DiceEvaluate for SelectedDice {
                     .map(|original: (Vec<i64>, Vec<i64>)| {
                         if original.0.len() > max_size.to_owned() as usize {
                             let range = match selector {
-                                Selector::Higher => (0..(max_size.to_owned() as usize)),
-                                Selector::Lower => (((max_size - 1) as usize)..original.0.len()),
+                                Selector::Higher => {
+                                    (original.0.len() - max_size.to_owned() as usize)
+                                        ..original.0.len()
+                                }
+                                Selector::Lower => (0..(max_size.to_owned() as usize)),
                             };
                             let mut source = original;
                             source.0.sort_unstable();
