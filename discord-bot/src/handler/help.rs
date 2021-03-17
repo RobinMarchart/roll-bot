@@ -1,17 +1,18 @@
 pub(crate) async fn help(
     context: serenity::client::Context,
     message: serenity::model::channel::Message,
+    prefix: String,
 ) {
     if let Err(err) = message.channel_id.send_message(&context, |m| {
                 m.reference_message((message.channel_id.clone(),message.id.clone()))
                     .allowed_mentions(|mentions|mentions.empty_users())
                  .embed(|e|{
                      e.title("Command Syntax")
-                      .description("
-all Commands are prefixed with `{command-prefix}`, which defaults to rrb!.
+                      .description(format!("
+all Commands are prefixed with `command-prefix`, which currently is {}.
 The prefix is recognized both with or without following whitespace.
 Both tab and newline are recognized as whitespace. Several whitespace characters are also accepted.
-                            ").field("Privileged Commands", "
+                            ",&prefix)).field("Privileged Commands", "
 Some commands require special permissions to use. They are prefixed with \\* in this overview.
 ", false)
                       .field(
@@ -60,7 +61,9 @@ One usage of this is to enable saving roll statements like 6{4d6k3}, the stateme
 `list`, `l` => list known aliases.
 ",
                           false
-                      ).field("About This Bot", "The source code for this Bot is available on [GitHub](https://github.com/RobinMarchart/roll-bot)", false)
+                      ).footer(|f|{
+                          f.text(format!("try {} info for more about this Bot",&prefix))
+                      })
                  })
             }).await {
                 log::warn!("Unable to reply to message {}: {}",message.id,err)

@@ -32,7 +32,7 @@ pub use robins_dice_roll::dice_roll::EvaluationErrors;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum CommandResult {
-    Help,
+    Help(String),
     RollHelp,
     Info,
     SetCommandPrefix(String),
@@ -61,7 +61,7 @@ impl<Id: storage::ClientId> ClientUtils<Id> {
     ) -> Option<CommandResult> {
         match commands::parse_logging(message, id.clone(), &self.store).await {
             Some(command) => Some(match command.0 {
-                commands::Command::Help => CommandResult::Help,
+                commands::Command::Help => CommandResult::Help(command.1),
                 commands::Command::RollHelp => CommandResult::RollHelp,
                 commands::Command::Info => CommandResult::Info,
                 commands::Command::SetCommandPrefix(prefix) => {

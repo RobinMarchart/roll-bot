@@ -106,7 +106,7 @@ async fn respond(
     response: CommandResult,
 ) {
     match response {
-        CommandResult::Help => help(context, message).await,
+        CommandResult::Help(prefix) => help(context, message, prefix).await,
         CommandResult::RollHelp => {}
         CommandResult::Info => {}
         CommandResult::SetCommandPrefix(prefix) => {
