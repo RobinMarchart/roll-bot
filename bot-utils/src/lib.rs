@@ -14,6 +14,9 @@ Copyright 2021 Robin Marchart
    limitations under the License.
 */
 
+#[macro_use]
+extern crate diesel;
+
 pub mod commands;
 pub mod rolls;
 pub mod storage;

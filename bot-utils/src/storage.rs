@@ -14,20 +14,55 @@
  *     limitations under the License.
  */
 
+use diesel::prelude::*;
 use robins_dice_roll::dice_types::Expression;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use sha2::{digest::generic_array::GenericArray, Digest, Sha256};
+use serde::{
+    de::{DeserializeOwned, Visitor},
+    Deserialize, Serialize,
+};
 use std::hash::Hash;
-use std::ops::Deref;
-use std::path::Path;
 use std::sync::Arc;
 use std::{collections::HashMap, fmt};
 use tokio::{
-    fs,
     sync::{mpsc, oneshot},
     task::spawn,
 };
+mod schema;
+use cached::{Cached, SizedCache};
+mod cc {
+    use super::schema::client_config;
+    #[derive(Debug, Queryable, Clone, Identifiable, Insertable)]
+    #[table_name = "client_config"]
+    pub(crate) struct ClientConfig {
+        pub(crate) id: String,
+        pub(crate) command_prefix: String,
+        pub(crate) roll_prefix: String,
+        pub(crate) aliases: String,
+        pub(crate) roll_info: bool,
+    }
+    impl ClientConfig {
+        pub(crate) fn new(id: String) -> ClientConfig {
+            ClientConfig {
+                id,
+                command_prefix: "rrb!".to_string(),
+                roll_prefix: "[]".to_string(),
+                aliases: "{}".to_string(),
+                roll_info: false,
+            }
+        }
+    }
 
+    #[derive(Debug, AsChangeset)]
+    #[table_name = "client_config"]
+    pub(crate) struct ClientConfigChangeset {
+        command_prefix: Option<String>,
+        roll_prefix: Option<String>,
+        aliases: Option<String>,
+        roll_info: Option<bool>,
+    }
+}
+
+use cc::{ClientConfig, ClientConfigChangeset};
 pub trait ClientId:
     Serialize + DeserializeOwned + Eq + fmt::Debug + Hash + Clone + Send + Sync + Sized + 'static
 {
@@ -48,408 +83,219 @@ impl<
 {
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-struct ClientInformation {
-    command_prefix: String,
-    roll_prefix: Vec<String>,
-    alias: HashMap<String, Arc<Expression>>,
+#[derive(Debug, Serialize, PartialEq, Eq, Hash, Clone)]
+struct Client<Id: ClientId> {
+    client_type: Arc<String>,
+    client_id: Id,
 }
 
-enum ClientInformationWrapper<Id: ClientId> {
-    Available(ClientInformation, mpsc::Sender<(Id, ClientInformation)>),
-    Waiting(Vec<StorageOps<Id>>),
+#[derive(Debug, Clone)]
+struct ClientInformation {
+    source: ClientConfig,
+    roll_prefix: Vec<String>,
+    aliases: HashMap<String, Arc<Expression>>,
+    command_prefix_changed: bool,
+    roll_prefix_changed: bool,
+    aliases_changed: bool,
+    roll_info_changed: bool,
 }
 
 impl ClientInformation {
-    fn new() -> ClientInformation {
+    fn new(source: ClientConfig) -> ClientInformation {
+        let mut roll_prefix_changed = false;
+        let roll_prefix = match serde_json::from_str(&source.roll_prefix) {
+            Ok(p) => p,
+            Err(err) => {
+                log::warn!(
+                    "unable to parse roll prefixes from {}: {}",
+                    &source.roll_prefix,
+                    err
+                );
+                roll_prefix_changed = true;
+                vec![]
+            }
+        };
+        let mut aliases_changed = false;
+        let aliases = match serde_json::from_str(&source.aliases) {
+            Ok(a) => a,
+            Err(err) => {
+                log::warn!("unable to parse aliases from {}: {}", &source.aliases, err);
+                aliases_changed = true;
+                HashMap::new()
+            }
+        };
         ClientInformation {
-            command_prefix: "rrb!".to_string(),
-            roll_prefix: vec![],
-            alias: HashMap::new(),
+            source,
+            roll_prefix,
+            aliases,
+            command_prefix_changed: false,
+            roll_prefix_changed,
+            aliases_changed,
+            roll_info_changed: false,
         }
     }
-}
 
-struct Storage<Id: ClientId> {
-    cache: HashMap<Id, ClientInformationWrapper<Id>>,
-    store_path: Box<Path>,
-    receiver: mpsc::UnboundedReceiver<StorageOps<Id>>,
-    sender: mpsc::UnboundedSender<StorageOps<Id>>,
-    write_handler: mpsc::Sender<(Id, ClientInformation)>,
-    write_handler_counter: u8,
+    fn get_cmd_prefix(&self) -> &str {
+        &self.source.command_prefix
+    }
+    fn get_cmd_prefix_mut(&mut self) -> &mut str {
+        self.command_prefix_changed = true;
+        &mut self.source.command_prefix
+    }
+    fn get_roll_prefix(&self) -> &[String] {
+        &self.roll_prefix
+    }
+    fn get_roll_prefix_mut(&mut self) -> &mut [String] {
+        self.roll_prefix_changed = true;
+        &mut self.roll_prefix
+    }
+    fn get_aliases(&self) -> &HashMap<String, Arc<Expression>> {
+        &self.aliases
+    }
+    fn get_aliases_mut(&mut self) -> &mut HashMap<String, Arc<Expression>> {
+        self.aliases_changed = true;
+        &mut self.aliases
+    }
+    fn get_roll_info(&self) -> bool {
+        self.source.roll_info.clone()
+    }
+    fn get_roll_info_mut(&mut self) -> &mut bool {
+        self.roll_info_changed = true;
+        &mut self.source.roll_info
+    }
 }
 
 #[derive(Debug)]
 enum StorageOps<Id: ClientId> {
     SetClientInfo(Id, ClientInformation),
-    GetCommandPrefix(Id, oneshot::Sender<String>),
-    SetCommandPrefix(Id, String, oneshot::Sender<()>),
-    GetRollPrefixes(Id, oneshot::Sender<Vec<String>>),
-    AddRollPrefix(Id, String, oneshot::Sender<Result<(), ()>>),
-    RemoveRollPrefix(Id, String, oneshot::Sender<Result<(), ()>>),
-    GetAllAlias(Id, oneshot::Sender<HashMap<String, Arc<Expression>>>),
-    GetAlias(Id, String, oneshot::Sender<Option<Arc<Expression>>>),
-    AddAlias(Id, String, Expression, oneshot::Sender<()>),
-    RemoveAlias(Id, String, oneshot::Sender<Result<(), ()>>),
+    GetCommandPrefix(
+        Id,
+        mpsc::UnboundedSender<StorageOps<Id>>,
+        oneshot::Sender<String>,
+    ),
+    SetCommandPrefix(
+        Id,
+        mpsc::UnboundedSender<StorageOps<Id>>,
+        String,
+        oneshot::Sender<()>,
+    ),
+    GetRollPrefixes(
+        Id,
+        mpsc::UnboundedSender<StorageOps<Id>>,
+        oneshot::Sender<Vec<String>>,
+    ),
+    AddRollPrefix(
+        Id,
+        mpsc::UnboundedSender<StorageOps<Id>>,
+        String,
+        oneshot::Sender<Result<(), ()>>,
+    ),
+    RemoveRollPrefix(
+        Id,
+        mpsc::UnboundedSender<StorageOps<Id>>,
+        String,
+        oneshot::Sender<Result<(), ()>>,
+    ),
+    GetAllAlias(
+        Id,
+        mpsc::UnboundedSender<StorageOps<Id>>,
+        oneshot::Sender<HashMap<String, Arc<Expression>>>,
+    ),
+    GetAlias(
+        Id,
+        mpsc::UnboundedSender<StorageOps<Id>>,
+        String,
+        oneshot::Sender<Option<Arc<Expression>>>,
+    ),
+    AddAlias(
+        Id,
+        mpsc::UnboundedSender<StorageOps<Id>>,
+        String,
+        Expression,
+        oneshot::Sender<()>,
+    ),
+    RemoveAlias(
+        Id,
+        mpsc::UnboundedSender<StorageOps<Id>>,
+        String,
+        oneshot::Sender<Result<(), ()>>,
+    ),
+}
+
+pub(crate) struct GlobalStorage {
+    db: SqliteConnection,
+}
+
+impl GlobalStorage {
+    pub(crate) fn new(db_url: &str) -> diesel::ConnectionResult<GlobalStorage> {
+        Ok(GlobalStorage {
+            db: SqliteConnection::establish(db_url)?,
+        })
+    }
+    fn query(&self, client_id: &str) -> Option<ClientConfig> {
+        use schema::client_config::dsl::*;
+        match client_config.find(client_id).first(&self.db) {
+            Ok(v) => Some(v),
+            Err(err) => {
+                log::info!("Error getting {} from db: {}", client_id, err);
+                None
+            }
+        }
+    }
+    fn get(&self, client_id: String) -> ClientConfig {
+        self.query(&client_id).unwrap_or_else(|| {
+            use schema::client_config::dsl::*;
+            let conf = ClientConfig::new(client_id);
+            match diesel::insert_into(client_config)
+                .values(&conf)
+                .execute(&self.db)
+            {
+                Ok(_) => {}
+                Err(err) => {
+                    log::warn!("{}", err);
+                }
+            };
+            conf
+        })
+    }
+    fn set(&self, config: ClientInformation) {
+        use schema::client_config::dsl::*;
+        match diesel::update(schema::client_config::table)
+            .set(&ClientConfigChangeset {
+                command_prefix: if config.command_prefix_changed {
+                    Some(config.source.command_prefix)
+                } else {
+                    None
+                },
+                aliases: if config.aliases_changed {
+                    Some(serde_json::to_string(&config.aliases).unwrap_or("{}".to_string()))
+                } else {
+                    None
+                },
+                roll_prefix: if config.roll_prefix_changed {
+                    Some(serde_json::to_string(&config.roll_prefix).unwrap_or("[]".to_string()))
+                } else {
+                    None
+                },
+                roll_info: if config.roll_info_changed {
+                    Some(config.source.roll_info)
+                } else {
+                    None
+                },
+            })
+            .execute(&self.db)
+        {
+            Ok(_) => {}
+            Err(err) => {
+                log::warn!("{}", err);
+            }
+        };
+    }
 }
 
 pub struct StorageHandle<Id: ClientId> {
-    channel: mpsc::UnboundedSender<StorageOps<Id>>,
-}
-
-fn hash_id<Id: Serialize>(id: &Id) -> GenericArray<u8, <Sha256 as Digest>::OutputSize> {
-    Sha256::digest(&serde_cbor::to_vec(id).expect("failed serializing id"))
-}
-
-impl<Id: ClientId> Storage<Id> {
-    async fn new(
-        store_path: Box<Path>,
-    ) -> std::io::Result<(Storage<Id>, mpsc::UnboundedSender<StorageOps<Id>>)> {
-        tokio::fs::create_dir_all(store_path.as_ref()).await?;
-        let (sender, receiver) = mpsc::unbounded_channel();
-        let store_path_clone = store_path.clone();
-        let store = Storage::<Id> {
-            cache: HashMap::new(),
-            store_path,
-            sender,
-            receiver,
-            write_handler: create_write_handler(store_path_clone),
-            write_handler_counter: 0,
-        };
-        let input_sender = store.sender.clone();
-        Ok((store, input_sender))
-    }
-
-    fn load(&mut self, id: Id, op: StorageOps<Id>) {
-        self.cache
-            .insert(id.clone(), ClientInformationWrapper::Waiting(vec![op]));
-        let id_clone = id.clone();
-        let path_clone = self.store_path.clone();
-        let result_channel = self.sender.clone();
-
-        spawn(async move {
-            let id: Id = id_clone;
-            let hashed_id = hex::encode(hash_id(&id));
-            let path = Box::new(path_clone.deref().join(hashed_id + ".toml"));
-            let client_info = match fs::read(path.clone().deref()).await {
-                Ok(content) => match toml::from_slice(&content) {
-                    Ok(info) => info,
-                    Err(e) => {
-                        log::warn!("Parsing client information for {:?} from {:?} resulted in Error {}.\n Using default values",&id,path.deref(),e);
-                        ClientInformation::new()
-                    }
-                },
-                Err(e) => {
-                    log::warn!("Unable to open client information for {:?} from {:?}: {}.\n Using default values",&id,path.deref(),e);
-                    ClientInformation::new()
-                }
-            };
-            result_channel
-                .send(StorageOps::SetClientInfo(id, client_info))
-                .unwrap()
-        });
-    }
-
-    async fn handle(mut self) {
-        loop {
-            match self.receiver.recv().await {
-                Some(operation) => match operation {
-                    StorageOps::GetCommandPrefix(id, channel) => match self.cache.get_mut(&id) {
-                        Some(value) => match value {
-                            ClientInformationWrapper::Available(data, _) => {
-                                channel.send(data.command_prefix.clone()).unwrap()
-                            }
-                            ClientInformationWrapper::Waiting(vec) => {
-                                vec.push(StorageOps::GetCommandPrefix(id, channel))
-                            }
-                        },
-                        None => {
-                            let id_clone = id.clone();
-                            self.load(id, StorageOps::GetCommandPrefix(id_clone, channel));
-                        }
-                    },
-                    StorageOps::SetCommandPrefix(id, prefix, channel) => {
-                        match self.cache.get_mut(&id) {
-                            Some(value) => match value {
-                                ClientInformationWrapper::Available(data, write) => {
-                                    data.command_prefix = prefix;
-                                    write.send((id, data.to_owned())).await.unwrap();
-                                    channel.send(()).unwrap();
-                                }
-                                ClientInformationWrapper::Waiting(vec) => {
-                                    vec.push(StorageOps::SetCommandPrefix(id, prefix, channel))
-                                }
-                            },
-                            None => {
-                                let id_clone = id.clone();
-                                self.load(
-                                    id,
-                                    StorageOps::SetCommandPrefix(id_clone, prefix, channel),
-                                )
-                            }
-                        }
-                    }
-                    StorageOps::GetRollPrefixes(id, channel) => match self.cache.get_mut(&id) {
-                        Some(value) => match value {
-                            ClientInformationWrapper::Available(data, _) => {
-                                channel.send(data.roll_prefix.clone()).unwrap()
-                            }
-                            ClientInformationWrapper::Waiting(vec) => {
-                                vec.push(StorageOps::GetRollPrefixes(id, channel))
-                            }
-                        },
-                        None => {
-                            let id_clone = id.clone();
-                            self.load(id, StorageOps::GetRollPrefixes(id_clone, channel))
-                        }
-                    },
-                    StorageOps::RemoveRollPrefix(id, prefix, channel) => {
-                        match self.cache.get_mut(&id) {
-                            Some(value) => match value {
-                                ClientInformationWrapper::Available(data, write) => {
-                                    for index in 0..data.roll_prefix.len() {
-                                        if data.roll_prefix.get(index).unwrap() == &prefix {
-                                            data.roll_prefix.remove(index);
-                                            write.send((id, data.clone())).await.unwrap();
-                                            channel.send(Ok(())).unwrap();
-                                            return;
-                                        }
-                                    }
-                                    channel.send(Err(())).unwrap()
-                                }
-                                ClientInformationWrapper::Waiting(vec) => {
-                                    vec.push(StorageOps::RemoveRollPrefix(id, prefix, channel))
-                                }
-                            },
-                            None => {
-                                let id_clone = id.clone();
-                                self.load(
-                                    id,
-                                    StorageOps::RemoveRollPrefix(id_clone, prefix, channel),
-                                )
-                            }
-                        }
-                    }
-                    StorageOps::AddRollPrefix(id, prefix, channel) => match self.cache.get_mut(&id)
-                    {
-                        Some(value) => match value {
-                            ClientInformationWrapper::Available(data, write) => {
-                                for p in data.roll_prefix.iter() {
-                                    if p == prefix.as_str() {
-                                        channel.send(Err(())).unwrap();
-                                        return;
-                                    }
-                                }
-                                data.roll_prefix.push(prefix);
-                                write.send((id, data.clone())).await.unwrap();
-                                channel.send(Ok(())).unwrap();
-                            }
-                            ClientInformationWrapper::Waiting(vec) => {
-                                vec.push(StorageOps::AddRollPrefix(id, prefix, channel))
-                            }
-                        },
-                        None => {
-                            let id_clone = id.clone();
-                            self.load(id, StorageOps::AddRollPrefix(id_clone, prefix, channel))
-                        }
-                    },
-                    StorageOps::GetAllAlias(id, channel) => match self.cache.get_mut(&id) {
-                        Some(value) => match value {
-                            ClientInformationWrapper::Available(data, _) => {
-                                channel.send(data.alias.clone()).unwrap()
-                            }
-                            ClientInformationWrapper::Waiting(vec) => {
-                                vec.push(StorageOps::GetAllAlias(id, channel))
-                            }
-                        },
-                        None => {
-                            let id_clone = id.clone();
-                            self.load(id, StorageOps::GetAllAlias(id_clone, channel))
-                        }
-                    },
-                    StorageOps::GetAlias(id, alias, channel) => match self.cache.get_mut(&id) {
-                        Some(value) => match value {
-                            ClientInformationWrapper::Available(data, _) => channel
-                                .send(data.alias.get(&alias).map(|a| a.clone()))
-                                .unwrap(),
-                            ClientInformationWrapper::Waiting(vec) => {
-                                vec.push(StorageOps::GetAlias(id, alias, channel))
-                            }
-                        },
-                        None => {
-                            let id_clone = id.clone();
-                            self.load(id, StorageOps::GetAlias(id_clone, alias, channel))
-                        }
-                    },
-                    StorageOps::AddAlias(id, alias, expr, channel) => match self.cache.get_mut(&id)
-                    {
-                        Some(value) => match value {
-                            ClientInformationWrapper::Available(data, write) => {
-                                data.alias.insert(alias, Arc::new(expr));
-                                write.send((id, data.clone())).await.unwrap();
-                                channel.send(()).unwrap()
-                            }
-                            ClientInformationWrapper::Waiting(vec) => {
-                                vec.push(StorageOps::AddAlias(id, alias, expr, channel))
-                            }
-                        },
-                        None => {
-                            let id_clone = id.clone();
-                            self.load(id, StorageOps::AddAlias(id_clone, alias, expr, channel))
-                        }
-                    },
-                    StorageOps::RemoveAlias(id, alias, channel) => match self.cache.get_mut(&id) {
-                        Some(value) => match value {
-                            ClientInformationWrapper::Available(data, write) => {
-                                let result = data.alias.remove(&alias);
-                                write.send((id, data.clone())).await.unwrap();
-                                channel
-                                    .send(match result {
-                                        Some(_) => Ok(()),
-                                        None => Err(()),
-                                    })
-                                    .unwrap()
-                            }
-                            ClientInformationWrapper::Waiting(vec) => {
-                                vec.push(StorageOps::RemoveAlias(id, alias, channel))
-                            }
-                        },
-                        None => {
-                            let id_clone = id.clone();
-                            self.load(id, StorageOps::RemoveAlias(id_clone, alias, channel))
-                        }
-                    },
-                    StorageOps::SetClientInfo(id, new) => {
-                        self.write_handler_counter = self.write_handler_counter.wrapping_add(1);
-                        if let Some(ClientInformationWrapper::Waiting(vec)) = self.cache.insert(
-                            id,
-                            ClientInformationWrapper::Available(
-                                new,
-                                if self.write_handler_counter == 0 {
-                                    self.write_handler =
-                                        create_write_handler(self.store_path.clone());
-                                    self.write_handler.clone()
-                                } else {
-                                    self.write_handler.clone()
-                                },
-                            ),
-                        ) {
-                            for a in vec {
-                                self.sender.send(a).unwrap();
-                            }
-                        }
-                    }
-                },
-                None => {
-                    break;
-                }
-            }
-        }
-    }
-}
-
-fn create_write_handler<Id: ClientId>(
-    base_path: Box<Path>,
-) -> mpsc::Sender<(Id, ClientInformation)> {
-    let (sender, mut receiver) = mpsc::channel::<(Id, ClientInformation)>(32);
-    spawn(async move {
-        loop {
-            match receiver.recv().await {
-                Some((id, value)) => {
-                    let path = base_path.join(hex::encode(hash_id(&id)) + ".toml");
-                    match toml::to_vec(&value) {
-                        Ok(val) => match fs::write(path, val).await {
-                            Ok(_) => {}
-                            Err(e) => {
-                                log::warn!("Failed to write config change for {:?}: {}", id, e)
-                            }
-                        },
-                        Err(e) => {
-                            log::warn!(
-                                "Failed to serialize config for {:?}: {}\nConfig: {:?}",
-                                id,
-                                e,
-                                value
-                            )
-                        }
-                    }
-                }
-                None => break,
-            }
-        }
-    });
-    sender
-}
-
-impl<Id: ClientId> StorageHandle<Id> {
-    pub async fn new(base_path: Box<Path>) -> std::io::Result<StorageHandle<Id>> {
-        let (store, sender) = Storage::new(base_path).await?;
-        spawn(async move {
-            store.handle().await;
-        });
-        Ok(StorageHandle { channel: sender })
-    }
-    pub async fn get_command_prefix(&self, id: Id) -> String {
-        let (sender, receiver) = oneshot::channel();
-        self.channel
-            .send(StorageOps::GetCommandPrefix(id, sender))
-            .unwrap();
-        receiver.await.unwrap()
-    }
-    pub async fn set_command_prefix(&self, id: Id, prefix: String) {
-        let (sender, receiver) = oneshot::channel();
-        self.channel
-            .send(StorageOps::SetCommandPrefix(id, prefix, sender))
-            .unwrap();
-        receiver.await.unwrap()
-    }
-    pub async fn get_roll_prefixes(&self, id: Id) -> Vec<String> {
-        let (sender, receiver) = oneshot::channel();
-        self.channel
-            .send(StorageOps::GetRollPrefixes(id, sender))
-            .unwrap();
-        receiver.await.unwrap()
-    }
-    pub async fn add_roll_prefix(&self, id: Id, prefix: String) -> Result<(), ()> {
-        let (sender, receiver) = oneshot::channel();
-        self.channel
-            .send(StorageOps::AddRollPrefix(id, prefix, sender))
-            .unwrap();
-        receiver.await.unwrap()
-    }
-    pub async fn remove_roll_prefix(&self, id: Id, prefix: String) -> Result<(), ()> {
-        let (sender, receiver) = oneshot::channel();
-        self.channel
-            .send(StorageOps::RemoveRollPrefix(id, prefix, sender))
-            .unwrap();
-        receiver.await.unwrap()
-    }
-    pub async fn get_alias(&self, id: Id, alias: String) -> Option<Arc<Expression>> {
-        let (sender, receiver) = oneshot::channel();
-        self.channel
-            .send(StorageOps::GetAlias(id, alias, sender))
-            .unwrap();
-        receiver.await.unwrap()
-    }
-    pub async fn set_alias(&self, id: Id, alias: String, expr: Expression) {
-        let (sender, receiver) = oneshot::channel();
-        self.channel
-            .send(StorageOps::AddAlias(id, alias, expr, sender))
-            .unwrap();
-        receiver.await.unwrap()
-    }
-    pub async fn remove_alias(&self, id: Id, alias: String) -> Result<(), ()> {
-        let (sender, receiver) = oneshot::channel();
-        self.channel
-            .send(StorageOps::RemoveAlias(id, alias, sender))
-            .unwrap();
-        receiver.await.unwrap()
-    }
-    pub async fn get_all_alias(&self, id: Id) -> HashMap<String, Arc<Expression>> {
-        let (sender, receiver) = oneshot::channel();
-        self.channel
-            .send(StorageOps::GetAllAlias(id, sender))
-            .unwrap();
-        receiver.await.unwrap()
-    }
+    client_type: Arc<String>,
+    db_cache: SizedCache<Id, ClientInformation>,
+    query_cache: HashMap<Id, Vec<StorageOps<Id>>>,
+    global: Arc<GlobalStorage>,
 }
