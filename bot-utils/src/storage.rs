@@ -1,6 +1,4 @@
 /*
- *  Copyright 2021 Robin Marchart
- *
  *     Licensed under the Apache License, Version 2.0 (the "License");
  *     you may not use this file except in compliance with the License.
  *     You may obtain a copy of the License at
@@ -25,7 +23,7 @@ use std::sync::Arc;
 use std::{collections::HashMap, fmt};
 use tokio::{
     sync::{mpsc, oneshot},
-    task::spawn,
+    task::{spawn, spawn_blocking},
 };
 mod schema;
 use cached::{Cached, SizedCache};
@@ -84,8 +82,8 @@ impl<
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq, Hash, Clone)]
-struct Client<Id: ClientId> {
-    client_type: Arc<String>,
+struct Client<'s, Id: ClientId> {
+    client_type: &'s str,
     client_id: Id,
 }
 
@@ -138,14 +136,14 @@ impl ClientInformation {
     fn get_cmd_prefix(&self) -> &str {
         &self.source.command_prefix
     }
-    fn get_cmd_prefix_mut(&mut self) -> &mut str {
+    fn get_cmd_prefix_mut(&mut self) -> &mut String {
         self.command_prefix_changed = true;
         &mut self.source.command_prefix
     }
     fn get_roll_prefix(&self) -> &[String] {
         &self.roll_prefix
     }
-    fn get_roll_prefix_mut(&mut self) -> &mut [String] {
+    fn get_roll_prefix_mut(&mut self) -> &mut Vec<String> {
         self.roll_prefix_changed = true;
         &mut self.roll_prefix
     }
@@ -166,136 +164,458 @@ impl ClientInformation {
 }
 
 #[derive(Debug)]
-enum StorageOps<Id: ClientId> {
-    SetClientInfo(Id, ClientInformation),
-    GetCommandPrefix(
-        Id,
-        mpsc::UnboundedSender<StorageOps<Id>>,
-        oneshot::Sender<String>,
-    ),
-    SetCommandPrefix(
-        Id,
-        mpsc::UnboundedSender<StorageOps<Id>>,
+enum StorageOps {
+    GetCommandPrefix(oneshot::Sender<String>),
+    SetCommandPrefix(String, oneshot::Sender<()>),
+    GetRollPrefixes(oneshot::Sender<Vec<String>>),
+    AddRollPrefix(String, oneshot::Sender<Result<(), ()>>),
+    RemoveRollPrefix(String, oneshot::Sender<Result<(), ()>>),
+    GetAllAlias(oneshot::Sender<HashMap<String, Arc<Expression>>>),
+    GetAlias(String, oneshot::Sender<Option<Arc<Expression>>>),
+    AddAlias(String, Expression, oneshot::Sender<Result<(), ()>>),
+    RemoveAlias(String, oneshot::Sender<Result<(), ()>>),
+    GetRollInfo(oneshot::Sender<bool>),
+    SetRollInfo(bool, oneshot::Sender<()>),
+    Get(
         String,
-        oneshot::Sender<()>,
-    ),
-    GetRollPrefixes(
-        Id,
-        mpsc::UnboundedSender<StorageOps<Id>>,
-        oneshot::Sender<Vec<String>>,
-    ),
-    AddRollPrefix(
-        Id,
-        mpsc::UnboundedSender<StorageOps<Id>>,
-        String,
-        oneshot::Sender<Result<(), ()>>,
-    ),
-    RemoveRollPrefix(
-        Id,
-        mpsc::UnboundedSender<StorageOps<Id>>,
-        String,
-        oneshot::Sender<Result<(), ()>>,
-    ),
-    GetAllAlias(
-        Id,
-        mpsc::UnboundedSender<StorageOps<Id>>,
-        oneshot::Sender<HashMap<String, Arc<Expression>>>,
-    ),
-    GetAlias(
-        Id,
-        mpsc::UnboundedSender<StorageOps<Id>>,
-        String,
-        oneshot::Sender<Option<Arc<Expression>>>,
-    ),
-    AddAlias(
-        Id,
-        mpsc::UnboundedSender<StorageOps<Id>>,
-        String,
-        Expression,
-        oneshot::Sender<()>,
-    ),
-    RemoveAlias(
-        Id,
-        mpsc::UnboundedSender<StorageOps<Id>>,
-        String,
-        oneshot::Sender<Result<(), ()>>,
+        oneshot::Sender<(String, Vec<String>, Option<Arc<Expression>>)>,
     ),
 }
 
 pub(crate) struct GlobalStorage {
-    db: SqliteConnection,
+    db_submit: mpsc::Sender<Box<dyn Send + FnOnce(&SqliteConnection) -> ()>>,
+    join: std::thread::JoinHandle<()>,
 }
 
 impl GlobalStorage {
-    pub(crate) fn new(db_url: &str) -> diesel::ConnectionResult<GlobalStorage> {
+    pub(crate) fn new(db_url: String) -> diesel::ConnectionResult<GlobalStorage> {
+        let (sender, receiver) = mpsc::channel(128);
         Ok(GlobalStorage {
-            db: SqliteConnection::establish(db_url)?,
+            db_submit: sender,
+            join: std::thread::Builder::new()
+                .name("db_worker".to_string())
+                .spawn(|| loop {
+                    let db = SqliteConnection::establish(&db_url).unwrap();
+                    match receiver.blocking_recv() {
+                        Some(f) => f(&db),
+                        None => {
+                            break log::info!("db worker queue closed");
+                        }
+                    }
+                })
+                .unwrap(),
         })
     }
-    fn query(&self, client_id: &str) -> Option<ClientConfig> {
-        use schema::client_config::dsl::*;
-        match client_config.find(client_id).first(&self.db) {
-            Ok(v) => Some(v),
-            Err(err) => {
-                log::info!("Error getting {} from db: {}", client_id, err);
-                None
-            }
-        }
-    }
-    fn get(&self, client_id: String) -> ClientConfig {
-        self.query(&client_id).unwrap_or_else(|| {
-            use schema::client_config::dsl::*;
-            let conf = ClientConfig::new(client_id);
-            match diesel::insert_into(client_config)
-                .values(&conf)
-                .execute(&self.db)
-            {
-                Ok(_) => {}
-                Err(err) => {
-                    log::warn!("{}", err);
-                }
-            };
-            conf
-        })
-    }
-    fn set(&self, config: ClientInformation) {
-        use schema::client_config::dsl::*;
-        match diesel::update(schema::client_config::table)
-            .set(&ClientConfigChangeset {
-                command_prefix: if config.command_prefix_changed {
-                    Some(config.source.command_prefix)
-                } else {
-                    None
-                },
-                aliases: if config.aliases_changed {
-                    Some(serde_json::to_string(&config.aliases).unwrap_or("{}".to_string()))
-                } else {
-                    None
-                },
-                roll_prefix: if config.roll_prefix_changed {
-                    Some(serde_json::to_string(&config.roll_prefix).unwrap_or("[]".to_string()))
-                } else {
-                    None
-                },
-                roll_info: if config.roll_info_changed {
-                    Some(config.source.roll_info)
-                } else {
-                    None
-                },
-            })
-            .execute(&self.db)
+    async fn get<Id: ClientId>(
+        &self,
+        client_id: String,
+        c_id: Id,
+        sender: std::sync::mpsc::Sender<(Id, ClientConfig)>,
+    ) {
+        match self
+            .db_submit
+            .send(Box::from(move |db: &SqliteConnection| {
+                use schema::client_config::dsl::*;
+                sender
+                    .send((
+                        c_id,
+                        match client_config.find(&client_id).first(db) {
+                            Ok(v) => v,
+                            Err(err) => {
+                                log::info!("Error getting {} from db: {}", &client_id, err);
+                                let conf = ClientConfig::new(client_id);
+                                match diesel::insert_into(client_config).values(&conf).execute(db) {
+                                    Ok(_) => {}
+                                    Err(err) => {
+                                        log::warn!("{}", err);
+                                    }
+                                };
+                                conf
+                            }
+                        },
+                    ))
+                    .unwrap()
+            }))
+            .await
         {
             Ok(_) => {}
-            Err(err) => {
-                log::warn!("{}", err);
-            }
+            Err(_) => panic!("unable to submit to db worker queue"),
+        };
+    }
+
+    async fn set(&self, config: &mut ClientInformation) {
+        let change = ClientConfigChangeset {
+            command_prefix: if config.command_prefix_changed {
+                config.command_prefix_changed = false;
+                Some(config.source.command_prefix.to_string())
+            } else {
+                None
+            },
+            aliases: if config.aliases_changed {
+                config.aliases_changed = false;
+                Some(serde_json::to_string(&config.aliases).unwrap_or("{}".to_string()))
+            } else {
+                None
+            },
+            roll_prefix: if config.roll_prefix_changed {
+                config.roll_prefix_changed = false;
+                Some(serde_json::to_string(&config.roll_prefix).unwrap_or("[]".to_string()))
+            } else {
+                None
+            },
+            roll_info: if config.roll_info_changed {
+                config.roll_info_changed = false;
+                Some(config.source.roll_info)
+            } else {
+                None
+            },
+        };
+        let id_clone = config.source.id.to_string();
+        match self
+            .db_submit
+            .send(Box::new(move |db| {
+                diesel::update(schema::client_config::dsl::client_config.find(&id_clone))
+                    .set(change)
+                    .execute(db)
+                    .unwrap();
+            }))
+            .await
+        {
+            Ok(_) => {}
+            Err(_) => panic!("unable to submit to db queue"),
         };
     }
 }
 
-pub struct StorageHandle<Id: ClientId> {
-    client_type: Arc<String>,
+impl Drop for GlobalStorage {
+    fn drop(&mut self) {
+        drop(self.db_submit);
+        self.join.join().unwrap()
+    }
+}
+
+struct ClientStorage<Id: ClientId> {
+    client_type: String,
     db_cache: SizedCache<Id, ClientInformation>,
-    query_cache: HashMap<Id, Vec<StorageOps<Id>>>,
+    query_cache: HashMap<Id, Vec<StorageOps>>,
     global: Arc<GlobalStorage>,
+    receiver: mpsc::Receiver<(Id, StorageOps)>,
+}
+
+fn run_cmd(client: &mut ClientInformation, op: StorageOps) -> bool {
+    match op {
+        StorageOps::GetCommandPrefix(channel) => {
+            channel.send(client.get_cmd_prefix().to_owned()).unwrap();
+            false
+        }
+        StorageOps::SetCommandPrefix(prefix, channel) => {
+            channel.send(*client.get_cmd_prefix_mut() = prefix).unwrap();
+            true
+        }
+        StorageOps::GetRollPrefixes(channel) => {
+            channel.send(client.get_roll_prefix().to_owned()).unwrap();
+            false
+        }
+        StorageOps::AddRollPrefix(prefix, channel) => {
+            channel
+                .send(if client.get_roll_prefix().contains(&prefix) {
+                    Err(())
+                } else {
+                    Ok(client.get_roll_prefix_mut().push(prefix))
+                })
+                .unwrap();
+            true
+        }
+        StorageOps::RemoveRollPrefix(prefix, channel) => {
+            channel.send(
+                client
+                    .get_roll_prefix()
+                    .iter()
+                    .position(|p| p == &prefix)
+                    .map(|p| {
+                        client.get_roll_prefix_mut().remove(p);
+                    })
+                    .ok_or(()),
+            );
+            true
+        }
+        StorageOps::GetAllAlias(channel) => {
+            channel.send(client.get_aliases().to_owned());
+            false
+        }
+        StorageOps::GetAlias(name, channel) => {
+            channel.send(client.get_aliases().get(&name).map(|a| a.to_owned()));
+            false
+        }
+        StorageOps::AddAlias(alias, expr, channel) => {
+            let expression = Arc::from(expr);
+            channel
+                .send(
+                    match client.get_aliases_mut().insert(alias, expression.clone()) {
+                        Some(old) => {
+                            if old == expression {
+                                Err(())
+                            } else {
+                                Ok(())
+                            }
+                        }
+                        None => Ok(()),
+                    },
+                )
+                .unwrap();
+            true
+        }
+        StorageOps::RemoveAlias(alias, channel) => {
+            channel
+                .send(
+                    client
+                        .get_aliases_mut()
+                        .remove(&alias)
+                        .map(|_| ())
+                        .ok_or(()),
+                )
+                .unwrap();
+            true
+        }
+        StorageOps::Get(message, channel) => {
+            channel
+                .send((
+                    client.get_cmd_prefix().to_owned(),
+                    client.get_roll_prefix().to_owned(),
+                    client.get_aliases().get(&message).map(|e| e.to_owned()),
+                ))
+                .unwrap();
+            false
+        }
+        StorageOps::GetRollInfo(channel) => {
+            channel.send(client.get_roll_info().to_owned()).unwrap();
+            false
+        }
+        StorageOps::SetRollInfo(new, channel) => {
+            channel.send(*client.get_roll_info_mut() = new).unwrap();
+            true
+        }
+    }
+}
+
+impl<Id: ClientId> ClientStorage<Id> {
+    fn new<S: ToString>(
+        client_type: S,
+        global: Arc<GlobalStorage>,
+        channel_size: usize,
+        cache_size: usize,
+    ) -> (ClientStorage<Id>, mpsc::Sender<(Id, StorageOps)>) {
+        let (sender, receiver) = mpsc::channel(channel_size);
+        (
+            ClientStorage {
+                client_type: client_type.to_string(),
+                db_cache: SizedCache::with_size(cache_size),
+                query_cache: HashMap::new(),
+                global,
+                receiver,
+            },
+            sender,
+        )
+    }
+    async fn run(mut self) {
+        let (loaded_sender, loaded_receiver) = std::sync::mpsc::channel::<(Id, ClientConfig)>();
+        loop {
+            match loaded_receiver.try_recv() {
+                Ok((id, config)) => {
+                    let mut info = ClientInformation::new(config);
+                    if self
+                        .query_cache
+                        .remove(&id)
+                        .into_iter()
+                        .flat_map(|v| v.into_iter())
+                        .map(|op| run_cmd(&mut info, op))
+                        .reduce(|r1, r2| r1 | r2)
+                        .unwrap_or(false)
+                    {
+                        self.global.set(&mut info);
+                    }
+                    self.db_cache.cache_set(id, info);
+                    continue;
+                }
+                Err(err) => match err {
+                    std::sync::mpsc::TryRecvError::Empty => {}
+                    std::sync::mpsc::TryRecvError::Disconnected => {
+                        panic!("loaded channel closed unexpectedly")
+                    }
+                },
+            }
+            match self.receiver.recv().await {
+                Some((id, op)) => match self.db_cache.cache_get_mut(&id) {
+                    Some(info) => {
+                        if run_cmd(info, op) {
+                            self.global.set(info);
+                        }
+                    }
+                    None => match self.query_cache.get_mut(&id) {
+                        Some(queue) => queue.push(op),
+                        None => {
+                            self.query_cache.insert(id.clone(), vec![op]);
+                            let id_clone = id.clone();
+                            let sender_clone = loaded_sender.clone();
+                            self.global
+                                .get(
+                                    serde_json::to_string(&Client {
+                                        client_type: &self.client_type,
+                                        client_id: id_clone,
+                                    })
+                                    .unwrap(),
+                                    id,
+                                    sender_clone,
+                                )
+                                .await;
+                        }
+                    },
+                },
+                None => break,
+            }
+        }
+        drop(loaded_sender);
+        spawn_blocking(move || loop {
+            match loaded_receiver.recv() {
+                Ok((id, config)) => {
+                    let mut info = ClientInformation::new(config);
+                    if self
+                        .query_cache
+                        .remove(&id)
+                        .into_iter()
+                        .flat_map(|v| v.into_iter())
+                        .map(|op| run_cmd(&mut info, op))
+                        .reduce(|r1, r2| r1 | r2)
+                        .unwrap_or(false)
+                    {
+                        self.global.set(&mut info);
+                    }
+                    self.db_cache.cache_set(id, info);
+                    continue;
+                }
+                Err(err) => break,
+            }
+        })
+        .await;
+    }
+}
+
+pub struct StorageHandle<Id: ClientId> {
+    sender: mpsc::Sender<(Id, StorageOps)>,
+}
+
+impl<Id: ClientId> StorageHandle<Id> {
+    pub fn new<S: ToString>(
+        client_type: S,
+        global: Arc<GlobalStorage>,
+        channel_size: usize,
+        cache_size: usize,
+    ) -> (StorageHandle<Id>, tokio::task::JoinHandle<()>) {
+        let (store, sender) = ClientStorage::new(client_type, global, channel_size, cache_size);
+        (
+            StorageHandle { sender },
+            spawn(async move { store.run().await }),
+        )
+    }
+
+    pub async fn get_command_prefix(&self, id: Id) -> String {
+        let (sender, receiver) = oneshot::channel();
+        self.sender
+            .send((id, StorageOps::GetCommandPrefix(sender)))
+            .await
+            .unwrap();
+        receiver.await.unwrap()
+    }
+    pub async fn set_command_prefix(&self, id: Id, prefix: String) {
+        let (sender, receiver) = oneshot::channel();
+        self.sender
+            .send((id, StorageOps::SetCommandPrefix(prefix, sender)))
+            .await
+            .unwrap();
+        receiver.await.unwrap()
+    }
+    pub async fn add_roll_prefix(&self, id: Id, prefix: String) -> Result<(), ()> {
+        let (sender, receiver) = oneshot::channel();
+        self.sender
+            .send((id, StorageOps::AddRollPrefix(prefix, sender)))
+            .await
+            .unwrap();
+        receiver.await.unwrap()
+    }
+    pub async fn remove_roll_prefix(&self, id: Id, prefix: String) -> Result<(), ()> {
+        let (sender, receiver) = oneshot::channel();
+        self.sender
+            .send((id, StorageOps::RemoveRollPrefix(prefix, sender)))
+            .await
+            .unwrap();
+        receiver.await.unwrap()
+    }
+    pub async fn get_roll_prefixes(&self, id: Id) -> Vec<String> {
+        let (sender, receiver) = oneshot::channel();
+        self.sender
+            .send((id, StorageOps::GetRollPrefixes(sender)))
+            .await
+            .unwrap();
+        receiver.await.unwrap()
+    }
+    pub async fn add_alias(&self, id: Id, alias: String, expr: Expression) -> Result<(), ()> {
+        let (sender, receiver) = oneshot::channel();
+        self.sender
+            .send((id, StorageOps::AddAlias(alias, expr, sender)))
+            .await
+            .unwrap();
+        receiver.await.unwrap()
+    }
+    pub async fn remove_alias(&self, id: Id, alias: String) -> Result<(), ()> {
+        let (sender, receiver) = oneshot::channel();
+        self.sender
+            .send((id, StorageOps::RemoveAlias(alias, sender)))
+            .await
+            .unwrap();
+        receiver.await.unwrap()
+    }
+    pub async fn get_alias(&self, id: Id, alias: String) -> Option<Arc<Expression>> {
+        let (sender, receiver) = oneshot::channel();
+        self.sender
+            .send((id, StorageOps::GetAlias(alias, sender)))
+            .await
+            .unwrap();
+        receiver.await.unwrap()
+    }
+    pub async fn get_all_alias(&self, id: Id) -> HashMap<String, Arc<Expression>> {
+        let (sender, receiver) = oneshot::channel();
+        self.sender
+            .send((id, StorageOps::GetAllAlias(sender)))
+            .await
+            .unwrap();
+        receiver.await.unwrap()
+    }
+    pub async fn get_roll_info(&self, id: Id) -> bool {
+        let (sender, receiver) = oneshot::channel();
+        self.sender
+            .send((id, StorageOps::GetRollInfo(sender)))
+            .await
+            .unwrap();
+        receiver.await.unwrap()
+    }
+    pub async fn set_roll_info(&self, id: Id, roll_info: bool) {
+        let (sender, receiver) = oneshot::channel();
+        self.sender
+            .send((id, StorageOps::SetRollInfo(roll_info, sender)))
+            .await
+            .unwrap();
+        receiver.await.unwrap()
+    }
+    pub async fn get(
+        &self,
+        id: Id,
+        message: String,
+    ) -> (String, Vec<String>, Option<Arc<Expression>>) {
+        let (sender, receiver) = oneshot::channel();
+        self.sender
+            .send((id, StorageOps::Get(message, sender)))
+            .await
+            .unwrap();
+        receiver.await.unwrap()
+    }
 }
