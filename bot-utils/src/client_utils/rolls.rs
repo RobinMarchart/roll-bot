@@ -17,6 +17,7 @@ use tokio::{
     time::{interval, sleep, sleep_until, Instant},
 };
 
+use crate::bot_manager::StopListener;
 use rusty_pool::{Builder, ThreadPool};
 
 #[derive(Debug)]
@@ -51,9 +52,12 @@ impl RngProvider {
     }
 }
 
-async fn start_rng_provider(rng_reseed: Duration) -> mpsc::Sender<RngProviderOps> {
+async fn start_rng_provider<Stop: StopListener>(
+    rng_reseed: Duration,
+    mut stop: Stop,
+) -> (tokio::task::JoinHandle<()>, mpsc::Sender<RngProviderOps>) {
     let (sender, receiver) = mpsc::channel(32);
-    spawn(async move {
+    let rng_handle = spawn(async move {
         RngProvider {
             rng: ChaCha20Rng::from_entropy(),
             receiver,
@@ -62,18 +66,39 @@ async fn start_rng_provider(rng_reseed: Duration) -> mpsc::Sender<RngProviderOps
         .await
     });
     let sender_clone = sender.clone();
-    spawn(async move {
-        sleep(rng_reseed.clone()).await;
-        let mut interval = interval(rng_reseed);
-        loop {
-            interval.tick().await;
-            sender_clone
-                .send(RngProviderOps::SetCryptoRng(ChaCha20Rng::from_entropy()))
-                .await
-                .unwrap();
-        }
-    });
-    sender
+    (
+        spawn(async move {
+            tokio::select! {
+                _ = sleep(rng_reseed.clone())=>{
+
+                }
+                _ = stop.wait_stop()=>{
+                    return rng_handle.await.unwrap();
+                }
+            };
+            let mut interval = interval(rng_reseed);
+            loop {
+                interval.tick().await;
+                tokio::select! {
+                    _ = interval.tick()=>{
+                        match sender_clone
+                    .send(RngProviderOps::SetCryptoRng(ChaCha20Rng::from_entropy()))
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(_) => {
+                        break;
+                    }
+                }
+
+                    }
+                    _ = stop.wait_stop()=>{break;}
+                }
+            }
+            rng_handle.await.unwrap()
+        }),
+        sender,
+    )
 }
 
 pub struct RollExecutor {
@@ -82,17 +107,25 @@ pub struct RollExecutor {
     rng_gen: mpsc::Sender<RngProviderOps>,
 }
 impl RollExecutor {
-    pub async fn new(size: u32, timeout: Duration, rng_reseed: Duration) -> RollExecutor {
-        let rng = start_rng_provider(rng_reseed).await;
-        RollExecutor {
-            pool: Builder::new()
-                .core_size(1)
-                .max_size(size)
-                .name("Roll Worker".to_string())
-                .build(),
-            timeout,
-            rng_gen: rng,
-        }
+    pub async fn new<Stop: StopListener>(
+        size: u32,
+        timeout: Duration,
+        rng_reseed: Duration,
+        stop: Stop,
+    ) -> (tokio::task::JoinHandle<()>, RollExecutor) {
+        let (handle, rng) = start_rng_provider(rng_reseed, stop).await;
+        (
+            handle,
+            RollExecutor {
+                pool: Builder::new()
+                    .core_size(1)
+                    .max_size(size)
+                    .name("Roll Worker".to_string())
+                    .build(),
+                timeout,
+                rng_gen: rng,
+            },
+        )
     }
 
     pub async fn roll<Expr>(&self, expr: Expr) -> Result<Vec<(i64, Vec<i64>)>, EvaluationErrors>

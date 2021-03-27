@@ -14,16 +14,13 @@
 
 use diesel::prelude::*;
 use robins_dice_roll::dice_types::Expression;
-use serde::{
-    de::{DeserializeOwned, Visitor},
-    Deserialize, Serialize,
-};
+use serde::{de::DeserializeOwned, Serialize};
 use std::hash::Hash;
 use std::sync::Arc;
 use std::{collections::HashMap, fmt};
 use tokio::{
     sync::{mpsc, oneshot},
-    task::{spawn, spawn_blocking},
+    task::spawn,
 };
 mod schema;
 use cached::{Cached, SizedCache};
@@ -53,10 +50,10 @@ mod cc {
     #[derive(Debug, AsChangeset)]
     #[table_name = "client_config"]
     pub(crate) struct ClientConfigChangeset {
-        command_prefix: Option<String>,
-        roll_prefix: Option<String>,
-        aliases: Option<String>,
-        roll_info: Option<bool>,
+        pub(crate) command_prefix: Option<String>,
+        pub(crate) roll_prefix: Option<String>,
+        pub(crate) aliases: Option<String>,
+        pub(crate) roll_info: Option<bool>,
     }
 }
 
@@ -184,17 +181,19 @@ enum StorageOps {
 
 pub(crate) struct GlobalStorage {
     db_submit: mpsc::Sender<Box<dyn Send + FnOnce(&SqliteConnection) -> ()>>,
-    join: std::thread::JoinHandle<()>,
 }
 
 impl GlobalStorage {
-    pub(crate) fn new(db_url: String) -> diesel::ConnectionResult<GlobalStorage> {
-        let (sender, receiver) = mpsc::channel(128);
-        Ok(GlobalStorage {
-            db_submit: sender,
-            join: std::thread::Builder::new()
+    pub(crate) fn new(
+        db_url: String,
+        channel_size: usize,
+    ) -> diesel::ConnectionResult<(GlobalStorage, std::thread::JoinHandle<()>)> {
+        let (sender, mut receiver) = mpsc::channel(channel_size);
+        Ok((
+            GlobalStorage { db_submit: sender },
+            std::thread::Builder::new()
                 .name("db_worker".to_string())
-                .spawn(|| loop {
+                .spawn(move || loop {
                     let db = SqliteConnection::establish(&db_url).unwrap();
                     match receiver.blocking_recv() {
                         Some(f) => f(&db),
@@ -204,7 +203,7 @@ impl GlobalStorage {
                     }
                 })
                 .unwrap(),
-        })
+        ))
     }
     async fn get<Id: ClientId>(
         &self,
@@ -287,13 +286,6 @@ impl GlobalStorage {
     }
 }
 
-impl Drop for GlobalStorage {
-    fn drop(&mut self) {
-        drop(self.db_submit);
-        self.join.join().unwrap()
-    }
-}
-
 struct ClientStorage<Id: ClientId> {
     client_type: String,
     db_cache: SizedCache<Id, ClientInformation>,
@@ -327,24 +319,28 @@ fn run_cmd(client: &mut ClientInformation, op: StorageOps) -> bool {
             true
         }
         StorageOps::RemoveRollPrefix(prefix, channel) => {
-            channel.send(
-                client
-                    .get_roll_prefix()
-                    .iter()
-                    .position(|p| p == &prefix)
-                    .map(|p| {
-                        client.get_roll_prefix_mut().remove(p);
-                    })
-                    .ok_or(()),
-            );
+            channel
+                .send(
+                    client
+                        .get_roll_prefix()
+                        .iter()
+                        .position(|p| p == &prefix)
+                        .map(|p| {
+                            client.get_roll_prefix_mut().remove(p);
+                        })
+                        .ok_or(()),
+                )
+                .unwrap();
             true
         }
         StorageOps::GetAllAlias(channel) => {
-            channel.send(client.get_aliases().to_owned());
+            channel.send(client.get_aliases().to_owned()).unwrap();
             false
         }
         StorageOps::GetAlias(name, channel) => {
-            channel.send(client.get_aliases().get(&name).map(|a| a.to_owned()));
+            channel
+                .send(client.get_aliases().get(&name).map(|a| a.to_owned()))
+                .unwrap();
             false
         }
         StorageOps::AddAlias(alias, expr, channel) => {
@@ -420,7 +416,8 @@ impl<Id: ClientId> ClientStorage<Id> {
     async fn run(mut self) {
         let (loaded_sender, loaded_receiver) = std::sync::mpsc::channel::<(Id, ClientConfig)>();
         loop {
-            match loaded_receiver.try_recv() {
+            let rcv = loaded_receiver.try_recv();
+            match rcv {
                 Ok((id, config)) => {
                     let mut info = ClientInformation::new(config);
                     if self
@@ -432,7 +429,7 @@ impl<Id: ClientId> ClientStorage<Id> {
                         .reduce(|r1, r2| r1 | r2)
                         .unwrap_or(false)
                     {
-                        self.global.set(&mut info);
+                        self.global.set(&mut info).await;
                     }
                     self.db_cache.cache_set(id, info);
                     continue;
@@ -448,7 +445,7 @@ impl<Id: ClientId> ClientStorage<Id> {
                 Some((id, op)) => match self.db_cache.cache_get_mut(&id) {
                     Some(info) => {
                         if run_cmd(info, op) {
-                            self.global.set(info);
+                            self.global.set(info).await;
                         }
                     }
                     None => match self.query_cache.get_mut(&id) {
@@ -475,8 +472,9 @@ impl<Id: ClientId> ClientStorage<Id> {
             }
         }
         drop(loaded_sender);
-        spawn_blocking(move || loop {
-            match loaded_receiver.recv() {
+        loop {
+            let rcv = loaded_receiver.recv();
+            match rcv {
                 Ok((id, config)) => {
                     let mut info = ClientInformation::new(config);
                     if self
@@ -488,15 +486,14 @@ impl<Id: ClientId> ClientStorage<Id> {
                         .reduce(|r1, r2| r1 | r2)
                         .unwrap_or(false)
                     {
-                        self.global.set(&mut info);
+                        self.global.set(&mut info).await;
                     }
                     self.db_cache.cache_set(id, info);
                     continue;
                 }
-                Err(err) => break,
+                Err(_) => break,
             }
-        })
-        .await;
+        }
     }
 }
 
@@ -505,7 +502,7 @@ pub struct StorageHandle<Id: ClientId> {
 }
 
 impl<Id: ClientId> StorageHandle<Id> {
-    pub fn new<S: ToString>(
+    pub(crate) fn new<S: ToString>(
         client_type: S,
         global: Arc<GlobalStorage>,
         channel_size: usize,

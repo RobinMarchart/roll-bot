@@ -8,7 +8,7 @@ repository = "https://github.com/RobinMarchart/roll-bot"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tokio = {version="^1.3.0", features=["fs","time","sync","rt"]}
+tokio = {version="^1.3.0", features=["time","sync","rt","rt-multi-thread","signal","macros"]}
 robins-dice-roll = {path = "../dice-roll"}
 nom = "^6.1.2"
 serde = {version="^1.0.124", features=["derive","rc"]}
@@ -22,5 +22,5 @@ rand_chacha = "^0.3.0"
 unicode_categories = "^0.1.1"
 toml = "0.5.8"
 diesel = {version= "^1.4.6", default-features=false, features=["sqlite","r2d2"]}
-cached = "0.23.0"
-serde_json = "1.0.64"
+cached = "^0.23.0"
+serde_json = "^1.0.64"
