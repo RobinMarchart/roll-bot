@@ -1,11 +1,8 @@
 pub use crate::bot_manager::StopListener;
 pub use crate::client_utils::{ClientId, ClientUtils, ClientUtilsBuilder};
 pub use async_trait::async_trait;
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
-pub use toml::Value;
+use std::sync::{Arc, Mutex};
+pub use toml::{map::Map, Value};
 
 #[async_trait]
 pub trait Bot: Send + 'static {
@@ -13,10 +10,10 @@ pub trait Bot: Send + 'static {
 }
 
 #[async_trait]
-pub trait BotBuilder: Send + 'static{
-    type B: Bot+'static;
+pub trait BotBuilder: Send + 'static {
+    type B: Bot + 'static;
     async fn build<S: StopListener>(
-        &mut self,
+        self,
         utils: Arc<Mutex<ClientUtilsBuilder>>,
         stop: S,
     ) -> Self::B;
@@ -24,5 +21,5 @@ pub trait BotBuilder: Send + 'static{
 
 pub trait BotConfig {
     type Builder: BotBuilder;
-    fn config(self, config: &mut HashMap<String, Value>) -> Self::Builder;
+    fn config(self, config: &mut Map<String, Value>) -> Self::Builder;
 }

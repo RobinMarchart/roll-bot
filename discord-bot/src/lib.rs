@@ -1,82 +1,128 @@
-use bot_utils::{Bot, ClientUtils, GlobalUtils};
+use bot_utils::{
+    bots::{async_trait, Bot, BotBuilder, BotConfig, Map, Value},
+    client_utils::{ClientUtilsBuilder, ClientUtilsConfig},
+};
 
-use serenity::client::ClientBuilder;
+use serenity::client::{Client, ClientBuilder};
 
-use async_trait::async_trait;
 use std::sync::Arc;
 
 pub struct DiscordBot {
-    config: DiscordBotConfig,
+    client: Client,
 }
 
-impl DiscordBot {
-    pub fn new() -> Box<DiscordBot> {
-        Box::new(DiscordBot {
-            config: DiscordBotConfig::default(),
-        })
+#[async_trait]
+impl Bot for DiscordBot {
+    async fn run(mut self) {
+        self.client.start_autosharded().await.unwrap()
+    }
+}
+
+pub struct DiscordBotBuilder {
+    invite_url: String,
+    token: String,
+    dm_utils: ClientUtilsConfig,
+    guild_utils: ClientUtilsConfig,
+}
+
+#[async_trait]
+impl BotBuilder for DiscordBotBuilder {
+    type B = DiscordBot;
+
+    async fn build<S: bot_utils::bot_manager::StopListener>(
+        self,
+        utils: Arc<std::sync::Mutex<ClientUtilsBuilder>>,
+        mut stop: S,
+    ) -> Self::B {
+        let dm_utils = utils.lock().unwrap().get_from_config(self.dm_utils);
+        let guild_utils = utils.lock().unwrap().get_from_config(self.guild_utils);
+        let client = ClientBuilder::new(self.token)
+            .event_handler(DiscordBotHandler {
+                dm_utils,
+                guild_utils,
+                invite_url: self.invite_url,
+            })
+            .await
+            .unwrap();
+        let shard = client.shard_manager.clone();
+        tokio::task::spawn(async move {
+            stop.wait_stop().await;
+            shard.lock().await.shutdown_all().await;
+        });
+        DiscordBot { client }
+    }
+}
+
+pub struct DiscordBotConfig {}
+
+impl BotConfig for DiscordBotConfig {
+    type Builder = DiscordBotBuilder;
+
+    fn config(self, config: &mut bot_utils::bots::Map<String, toml::Value>) -> Self::Builder {
+        let token = std::env::var("DISCORD_TOKEN")
+            .expect("No Discord API Token provided in DISCORD_TOKEN env var");
+        let discord_config = match config.get_mut("discord").and_then(|d| d.as_table_mut()) {
+            Some(d) => d,
+            None => {
+                log::warn!("Missing discord section in config");
+                config.insert("discord".to_string(), Value::from(Map::new()));
+                config.get_mut("discord").unwrap().as_table_mut().unwrap()
+            }
+        };
+        let invite_url = match discord_config
+            .get("invite_url")
+            .and_then(|u| u.as_str())
+            .map(|u| u.to_owned())
+        {
+            Some(u) => u,
+            None => {
+                log::warn!("Unable to read discord invite url!");
+                discord_config.insert(
+                    "invite_url".to_string(),
+                    Value::from("https://example.com".to_string()),
+                );
+                "https://example.com".to_string()
+            }
+        };
+        let dm_utils = ClientUtilsConfig::from_config(
+            "discord-dm",
+            match discord_config.get_mut("dm").and_then(|c| c.as_table_mut()) {
+                Some(t) => t,
+                None => {
+                    discord_config.insert("dm".to_string(), Value::from(Map::new()));
+                    discord_config
+                        .get_mut("dm")
+                        .unwrap()
+                        .as_table_mut()
+                        .unwrap()
+                }
+            },
+        );
+        let guild_utils = ClientUtilsConfig::from_config(
+            "discord-guild",
+            match discord_config
+                .get_mut("guild")
+                .and_then(|c| c.as_table_mut())
+            {
+                Some(t) => t,
+                None => {
+                    discord_config.insert("guild".to_string(), Value::from(Map::new()));
+                    discord_config
+                        .get_mut("guild")
+                        .unwrap()
+                        .as_table_mut()
+                        .unwrap()
+                }
+            },
+        );
+        DiscordBotBuilder {
+            invite_url,
+            token,
+            dm_utils,
+            guild_utils,
+        }
     }
 }
 
 mod handler;
 use handler::DiscordBotHandler;
-
-struct DiscordBotConfig {
-    invite_url: String,
-}
-impl Default for DiscordBotConfig {
-    fn default() -> Self {
-        DiscordBotConfig {
-            invite_url: "https://example.com".to_string(),
-        }
-    }
-}
-
-#[async_trait]
-impl Bot for DiscordBot {
-    async fn run(&self, utils: Arc<GlobalUtils>) {
-        let token = std::env::var("DISCORD_TOKEN")
-            .expect("No Discord API Token provided in DISCORD_TOKEN env var");
-        let handler = DiscordBotHandler {
-            guild_utils: ClientUtils::new(utils.clone(), "discord_guilds")
-                .await
-                .expect("error creating guild storage"),
-            dm_utils: ClientUtils::new(utils, "discord_dm")
-                .await
-                .expect("error creating dm storage"),
-        };
-
-        let mut client = ClientBuilder::new(token)
-            .raw_event_handler(handler)
-            .await
-            .expect("Error creating Client");
-        log::info!("created client");
-        client.start().await.expect("Client error")
-    }
-
-    fn config(&mut self, config: &mut std::collections::HashMap<String, toml::Value>) -> bool {
-        match config.get_mut("discord").and_then(|d| d.as_table_mut()) {
-            Some(table) => match table.get("invite-url").and_then(|i| i.as_str()) {
-                Some(url) => {
-                    self.config.invite_url = url.to_string();
-                    false
-                }
-                None => {
-                    table.insert(
-                        "invite-url".to_string(),
-                        toml::Value::from(self.config.invite_url.clone()),
-                    );
-                    true
-                }
-            },
-            None => {
-                let mut discord = std::collections::HashMap::<String, toml::Value>::new();
-                discord.insert(
-                    "invite-url".to_string(),
-                    toml::Value::from(self.config.invite_url.clone()),
-                );
-                config.insert("discord".to_string(), toml::Value::from(discord));
-                true
-            }
-        }
-    }
-}

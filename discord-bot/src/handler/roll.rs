@@ -1,4 +1,4 @@
-use bot_utils::EvaluationErrors;
+use bot_utils::client_utils::EvaluationErrors;
 use serenity::{client::Context, model::channel::Message};
 
 pub(crate) async fn roll(
@@ -19,9 +19,9 @@ pub(crate) async fn roll(
             )
         }
         Err(e) => match e {
-            bot_utils::EvaluationErrors::DivideByZero => "*Division by 0 detected*".to_string(),
-            bot_utils::EvaluationErrors::Timeout => "*Timeout*".to_string(),
-            bot_utils::EvaluationErrors::Overflow => "*Overflow detected*".to_string(),
+            EvaluationErrors::DivideByZero => "*Division by 0 detected*".to_string(),
+            EvaluationErrors::Timeout => "*Timeout*".to_string(),
+            EvaluationErrors::Overflow => "*Overflow detected*".to_string(),
         },
     };
     if let Err(err) = Message::reply(&message, &context, mes).await {

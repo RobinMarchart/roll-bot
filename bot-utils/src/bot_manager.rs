@@ -10,15 +10,10 @@ pub struct BotManager<B: BotWrapper> {
 }
 
 impl<B: BotWrapper> BotManager<B> {
-    async fn run(self) {
-        let (_, r) = join!(self.global_handle.wait(), JoinChain::join(self.bots.run()));
+    pub async fn run(self) {
+        let (_, r) = join!(self.global_handle.wait(), self.bots.run().join());
         ResultChain::result(r).unwrap();
     }
-}
-
-pub struct RuntimeBotManager<B: BotWrapper> {
-    manager: BotManager<B>,
-    runtime: tokio::runtime::Runtime,
 }
 
 #[async_trait]
@@ -67,9 +62,22 @@ impl<BB: BotBuilderWrapper + Send> BotManagerBuilder<BB> {
         BC: BotConfigWrapper<Output = BB>,
     {
         use std::convert::TryInto;
+        use toml::{map::Map, Value};
         let config_path = PathBuf::from(config_path.to_string());
-        let mut config: std::collections::HashMap<String, toml::Value> =
-            toml::from_slice(&std::fs::read(&config_path).unwrap()).unwrap();
+        let mut config: Map<String, Value> =
+            match toml::from_slice(&match std::fs::read(&config_path) {
+                Ok(a) => a,
+                Err(e) => {
+                    log::warn!("Unable to read config file: {}", e);
+                    vec![]
+                }
+            }) {
+                Ok(a) => a,
+                Err(e) => {
+                    log::warn!("Unable to parse config: {}", e);
+                    Map::new()
+                }
+            };
         let db_path = std::env::var("DB_PATH").unwrap_or_else(|_| {
             config
                 .get("db_path")
@@ -86,7 +94,7 @@ impl<BB: BotBuilderWrapper + Send> BotManagerBuilder<BB> {
             Some(i) => i,
             None => {
                 log::warn!("unable to read db_queue_size, overwriting with 64");
-                config.insert("db_queue_size".to_string(), toml::Value::from(64));
+                config.insert("db_queue_size".to_string(), Value::from(64));
                 64
             }
         };
@@ -99,7 +107,7 @@ impl<BB: BotBuilderWrapper + Send> BotManagerBuilder<BB> {
                 Some(t) => t,
                 None => {
                     log::warn!("unable to read roll_timeout_ms, overwriting with 2000");
-                    config.insert("roll_timeout_ms".to_string(), toml::Value::from(2000));
+                    config.insert("roll_timeout_ms".to_string(), Value::from(2000));
                     2000
                 }
             },
@@ -151,7 +159,6 @@ impl<BB: BotBuilderWrapper + Send> BotManagerBuilder<BB> {
             db_handle,
         }
     }
-    pub fn build() {}
 
     pub async fn build_async(
         self,

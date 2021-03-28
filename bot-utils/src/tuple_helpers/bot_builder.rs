@@ -25,7 +25,7 @@ where
         utils: Arc<Mutex<ClientUtilsBuilder>>,
         stop: S,
     ) -> Self::Output {
-        spawn(async move { self.build(utils, stop).await.unwrap() })
+        spawn(async move { self.build(utils, stop).await })
     }
 
     type Bot = BB::B;

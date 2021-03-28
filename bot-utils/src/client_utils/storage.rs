@@ -497,6 +497,7 @@ impl<Id: ClientId> ClientStorage<Id> {
     }
 }
 
+#[derive(Clone)]
 pub struct StorageHandle<Id: ClientId> {
     sender: mpsc::Sender<(Id, StorageOps)>,
 }

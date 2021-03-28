@@ -26,6 +26,8 @@ pub enum CommandResult {
     Roll(Result<Vec<(i64, Vec<i64>)>, EvaluationErrors>, String),
     InsufficentPermission,
 }
+
+#[derive(Clone)]
 pub struct ClientUtils<Id: ClientId> {
     roll: Arc<RollExecutor>,
     store: StorageHandle<Id>,
@@ -113,6 +115,9 @@ pub struct ClientUtilsBuilder {
     pub(crate) join_handles: Vec<JoinHandle<()>>,
 }
 
+use std::convert::TryInto;
+use toml::{map::Map, Value};
+
 impl ClientUtilsBuilder {
     pub fn get<Id: ClientId, S: ToString>(
         &mut self,
@@ -128,12 +133,66 @@ impl ClientUtilsBuilder {
             store: storage,
         }
     }
+    pub fn get_from_config<Id: ClientId>(&mut self, config: ClientUtilsConfig) -> ClientUtils<Id> {
+        self.get(config.client_type, config.channel_size, config.cache_size)
+    }
     pub async fn wait(self) {
         let handles = self.join_handles;
         drop(self.storage);
         drop(self.rolls);
         for handle in handles.into_iter() {
             handle.await.unwrap();
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ClientUtilsConfig {
+    pub channel_size: usize,
+    pub cache_size: usize,
+    pub client_type: String,
+}
+
+impl ClientUtilsConfig {
+    pub fn from_config<S: ToString>(
+        client_type: S,
+        config: &mut Map<String, Value>,
+    ) -> ClientUtilsConfig {
+        let client = client_type.to_string();
+        let channel_size: usize = match config
+            .get("queue_size")
+            .and_then(|v| v.as_integer())
+            .and_then(|i| i.try_into().ok())
+        {
+            Some(i) => i,
+            None => {
+                log::warn!(
+                    "Unable to read queue_size for {}, using default of 64",
+                    &client
+                );
+                config.insert("queue_size".to_string(), Value::from(64));
+                64
+            }
+        };
+        let cache_size: usize = match config
+            .get("cache_size")
+            .and_then(|v| v.as_integer())
+            .and_then(|i| i.try_into().ok())
+        {
+            Some(i) => i,
+            None => {
+                log::warn!(
+                    "Unable to read cache_size for {}, using default of 1024",
+                    &client
+                );
+                config.insert("cache_size".to_string(), Value::from(1024));
+                1024
+            }
+        };
+        ClientUtilsConfig {
+            channel_size,
+            cache_size,
+            client_type: client,
         }
     }
 }

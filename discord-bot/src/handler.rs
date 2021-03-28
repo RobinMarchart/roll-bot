@@ -1,49 +1,42 @@
 use async_trait::async_trait;
-use bot_utils::ClientUtils;
+use bot_utils::client_utils::ClientUtils;
 use serenity::{
     model::{
         channel::Message,
-        event::Event,
         id::{GuildId, UserId},
     },
-    prelude::RawEventHandler,
+    prelude::EventHandler,
 };
 
 pub(crate) struct DiscordBotHandler {
-    pub guild_utils: ClientUtils<GuildId>,
-    pub dm_utils: ClientUtils<UserId>,
+    pub(crate) guild_utils: ClientUtils<GuildId>,
+    pub(crate) dm_utils: ClientUtils<UserId>,
+    pub(crate) invite_url: String,
 }
 #[async_trait]
-impl RawEventHandler for DiscordBotHandler {
-    async fn raw_event(&self, ctx: serenity::client::Context, ev: Event) {
-        match ev {
-            Event::MessageCreate(event) => {
-                if event.message.author.bot {
-                } else if let Some(guild) = event.message.guild_id {
-                    if let Some(response) = self
-                        .guild_utils
-                        .eval(guild.clone(), &event.message.content, || {
-                            check_priviledged_access(&ctx, &event.message)
-                        })
-                        .await
-                    {
-                        respond(ctx, event.message, response).await;
-                    }
-                } else {
-                    if let Some(response) = self
-                        .dm_utils
-                        .eval(
-                            event.message.author.id.clone(),
-                            &event.message.content,
-                            || std::future::ready(true),
-                        )
-                        .await
-                    {
-                        respond(ctx, event.message, response).await;
-                    }
-                }
+impl EventHandler for DiscordBotHandler {
+    async fn message(&self, ctx: serenity::client::Context, message: Message) {
+        if message.author.bot {
+        } else if let Some(guild) = message.guild_id {
+            if let Some(response) = self
+                .guild_utils
+                .eval(guild.clone(), &message.content, || {
+                    check_priviledged_access(&ctx, &message)
+                })
+                .await
+            {
+                respond(ctx, message, response).await;
             }
-            _ => {}
+        } else {
+            if let Some(response) = self
+                .dm_utils
+                .eval(message.author.id.clone(), &message.content, || {
+                    std::future::ready(true)
+                })
+                .await
+            {
+                respond(ctx, message, response).await;
+            }
         }
     }
 }
@@ -85,7 +78,7 @@ async fn check_priviledged_access(context: &serenity::client::Context, message: 
     }
 }
 
-use bot_utils::CommandResult;
+use bot_utils::client_utils::CommandResult;
 
 mod help;
 use help::help;
