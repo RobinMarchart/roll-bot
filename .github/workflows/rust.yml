@@ -27,6 +27,7 @@ jobs:
   build_static:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v2
       - name: install x86_64 musl
         uses: actions-rs/toolchain@v1
         with:
