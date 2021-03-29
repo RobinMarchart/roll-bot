@@ -35,6 +35,6 @@ jobs:
           target: x86_64-unknown-linux-musl
           override: true
       - name: install musl
-        run: sudo apt-get install musl
+        run: sudo apt-get install musl musl-tools
       - name: build static bot
         run: cargo build --release --target x86_64-unknown-linux-musl --features bot-utils/bundled
