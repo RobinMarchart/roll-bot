@@ -21,9 +21,9 @@ jobs:
           toolchain: nightly
           override: true
       - name: Build
-        run: cargo check --verbose --all
+        run: cargo check --all
       - name: Run tests
-        run: cargo test --verbose --all
+        run: cargo test --all
       - name: install x86_64 musl
         uses: actions-rs/toolchain@v1
         with:
