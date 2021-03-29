@@ -143,6 +143,7 @@ impl ClientUtilsBuilder {
         for handle in handles.into_iter() {
             handle.await.unwrap();
         }
+        log::info!("all client utils finished")
     }
 }
 

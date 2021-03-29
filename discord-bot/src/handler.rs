@@ -25,7 +25,7 @@ impl EventHandler for DiscordBotHandler {
                 })
                 .await
             {
-                respond(ctx, message, response).await;
+                respond(ctx, message, response, &self.invite_url).await;
             }
         } else {
             if let Some(response) = self
@@ -35,7 +35,7 @@ impl EventHandler for DiscordBotHandler {
                 })
                 .await
             {
-                respond(ctx, message, response).await;
+                respond(ctx, message, response, &self.invite_url).await;
             }
         }
     }
@@ -92,16 +92,19 @@ mod roll;
 use roll::roll;
 mod permissions;
 use permissions::insufficent_permissions;
+mod info;
+use info::info;
 
 async fn respond(
     context: serenity::client::Context,
     message: serenity::model::channel::Message,
     response: CommandResult,
+    invite_url: &str,
 ) {
     match response {
         CommandResult::Help(prefix) => help(context, message, prefix).await,
         CommandResult::RollHelp => {}
-        CommandResult::Info => {}
+        CommandResult::Info => info(context, message, invite_url).await,
         CommandResult::SetCommandPrefix(prefix) => {
             set_command_prefix(context, message, prefix).await
         }

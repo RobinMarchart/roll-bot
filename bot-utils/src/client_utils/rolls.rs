@@ -73,6 +73,8 @@ async fn start_rng_provider<Stop: StopListener>(
 
                 }
                 _ = stop.wait_stop()=>{
+                    drop(sender_clone);
+                    log::info!("stopped reseeding task");
                     return rng_handle.await.unwrap();
                 }
             };
@@ -95,6 +97,8 @@ async fn start_rng_provider<Stop: StopListener>(
                     _ = stop.wait_stop()=>{break;}
                 }
             }
+            drop(sender_clone);
+            log::info!("stopped reseeding task");
             rng_handle.await.unwrap()
         }),
         sender,

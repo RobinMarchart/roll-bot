@@ -12,6 +12,7 @@ pub struct BotManager<B: BotWrapper> {
 impl<B: BotWrapper> BotManager<B> {
     pub async fn run(self) {
         let (_, r) = join!(self.global_handle.wait(), self.bots.run().join());
+        log::info!("bots finished");
         ResultChain::result(r).unwrap();
     }
 }
@@ -143,7 +144,8 @@ impl<BB: BotBuilderWrapper + Send> BotManagerBuilder<BB> {
 
         let (storage, db_handle) = GlobalStorage::new(db_path, db_queue_size).unwrap();
 
-        match std::fs::write(config_path, toml::to_vec(&config).unwrap()) {
+        let config_value: Value = config.into();
+        match std::fs::write(config_path, toml::to_vec(&config_value).unwrap()) {
             Ok(_) => {}
             Err(e) => {
                 log::error!("Error writing config: {}", e)

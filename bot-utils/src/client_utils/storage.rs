@@ -209,7 +209,7 @@ impl GlobalStorage {
         &self,
         client_id: String,
         c_id: Id,
-        sender: std::sync::mpsc::Sender<(Id, ClientConfig)>,
+        sender: mpsc::UnboundedSender<(Id, ClientConfig)>,
     ) {
         match self
             .db_submit
@@ -414,35 +414,33 @@ impl<Id: ClientId> ClientStorage<Id> {
         )
     }
     async fn run(mut self) {
-        let (loaded_sender, loaded_receiver) = std::sync::mpsc::channel::<(Id, ClientConfig)>();
+        let (loaded_sender, mut loaded_receiver) = mpsc::unbounded_channel::<(Id, ClientConfig)>();
         loop {
-            let rcv = loaded_receiver.try_recv();
-            match rcv {
-                Ok((id, config)) => {
-                    let mut info = ClientInformation::new(config);
-                    if self
-                        .query_cache
-                        .remove(&id)
-                        .into_iter()
-                        .flat_map(|v| v.into_iter())
-                        .map(|op| run_cmd(&mut info, op))
-                        .reduce(|r1, r2| r1 | r2)
-                        .unwrap_or(false)
-                    {
-                        self.global.set(&mut info).await;
-                    }
-                    self.db_cache.cache_set(id, info);
-                    continue;
-                }
-                Err(err) => match err {
-                    std::sync::mpsc::TryRecvError::Empty => {}
-                    std::sync::mpsc::TryRecvError::Disconnected => {
-                        panic!("loaded channel closed unexpectedly")
-                    }
-                },
-            }
-            match self.receiver.recv().await {
-                Some((id, op)) => match self.db_cache.cache_get_mut(&id) {
+            tokio::select! {
+                            biased;
+                            rcv = loaded_receiver.recv() =>{
+                                match rcv{
+                                    Some((id, config)) => {
+            let mut info = ClientInformation::new(config);
+                                if self
+                                    .query_cache
+                                    .remove(&id)
+                                    .into_iter()
+                                    .flat_map(|v| v.into_iter())
+                                    .map(|op| run_cmd(&mut info, op))
+                                    .reduce(|r1, r2| r1 | r2)
+                                    .unwrap_or(false)
+                                {
+                                    self.global.set(&mut info).await;
+                                }
+                                self.db_cache.cache_set(id, info);
+                                    }
+                                    None=> panic!("db receiver closed unexpectedly")
+                                }
+                            }
+                            rcv = self.receiver.recv() =>{
+                                match rcv{
+                                    Some((id, op)) => match self.db_cache.cache_get_mut(&id) {
                     Some(info) => {
                         if run_cmd(info, op) {
                             self.global.set(info).await;
@@ -466,16 +464,18 @@ impl<Id: ClientId> ClientStorage<Id> {
                                 )
                                 .await;
                         }
-                    },
+                    }
                 },
                 None => break,
-            }
+                                }
+                            }
+                        };
         }
         drop(loaded_sender);
         loop {
-            let rcv = loaded_receiver.recv();
+            let rcv = loaded_receiver.recv().await;
             match rcv {
-                Ok((id, config)) => {
+                Some((id, config)) => {
                     let mut info = ClientInformation::new(config);
                     if self
                         .query_cache
@@ -491,7 +491,7 @@ impl<Id: ClientId> ClientStorage<Id> {
                     self.db_cache.cache_set(id, info);
                     continue;
                 }
-                Err(_) => break,
+                None => break,
             }
         }
     }

@@ -14,7 +14,8 @@ pub struct DiscordBot {
 #[async_trait]
 impl Bot for DiscordBot {
     async fn run(mut self) {
-        self.client.start_autosharded().await.unwrap()
+        self.client.start_autosharded().await.unwrap();
+        log::info!("discord bot stopped")
     }
 }
 

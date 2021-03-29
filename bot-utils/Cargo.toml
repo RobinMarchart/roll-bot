@@ -24,3 +24,7 @@ toml = "0.5.8"
 diesel = {version= "^1.4.6", default-features=false, features=["sqlite","r2d2"]}
 cached = "^0.23.0"
 serde_json = "^1.0.64"
+libsqlite3-sys = {version="^0.20.1", features=["bundled"], optional=true}
+
+[features]
+bundled = ["libsqlite3-sys"]
