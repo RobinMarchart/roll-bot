@@ -24,12 +24,15 @@ jobs:
         run: cargo check --verbose --all
       - name: Run tests
         run: cargo test --verbose --all
+  build_static:
+    runs-on: ubuntu-latest
+    steps:
       - name: install x86_64 musl
         uses: actions-rs/toolchain@v1
         with:
           toolchain: nightly
           target: x86_64-unknown-linux-musl
       - name: install musl
-        run: apt install musl
+        run: sudo apt-get install musl
       - name: build static bot
         run: cargo build --release --target x86_64-unknown-linux-musl --features bot-utils/bundled
