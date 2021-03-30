@@ -7,5 +7,7 @@ VOLUME /config
 COPY --from=db --chown=0:0 /roll-bot.sqlite /roll-bot-db/roll-bot.sqlite
 VOLUME /roll-bot-db
 ENV DB_PATH=/roll-bot-db/roll-bot.sqlite
+ENV RUST_LOG=info,tracing::span=warn,robins_dice_roll::dice_roll=debug,serenity::http::request=warn,serenity::gateway::shard=warn
+ENV RUST_BACKTRACE=1
 ENTRYPOINT [ "/roll-bot", "/config/config.toml" ]
 LABEL org.opencontainers.image.source=https://github.com/RobinMarchart/roll-bot

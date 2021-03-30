@@ -189,6 +189,9 @@ impl<BB: BotBuilderWrapper + Send> BotManagerBuilder<BB> {
             match finished_sender.send(true) {
                 _ => {}
             }
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+            log::error!("Waiting for runtime shutdown timed out.");
+            std::process::abort()
         });
         let (handle, roll) = RollExecutor::new(
             self.rng_workers,
