@@ -38,3 +38,12 @@ jobs:
         with:
           name: static-roll-bot
           path: target/x86_64-unknown-linux-musl/release/roll-bot
+      - name: Build & Push Docker Container
+        uses: docker/build-push-action@v1
+        with:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+          registry: docker.pkg.github.com
+          repository: ${{ github.repository }}/roll-bot
+          tag_with_sha: true
+          tag_with_ref: true
