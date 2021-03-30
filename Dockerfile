@@ -8,3 +8,4 @@ COPY --from=db --chown=0:0 /roll-bot.sqlite /roll-bot-db/roll-bot.sqlite
 VOLUME /roll-bot-db
 ENV DB_PATH=/roll-bot-db/roll-bot.sqlite
 ENTRYPOINT [ "/roll-bot", "/config/config.toml" ]
+LABEL org.opencontainers.image.source=https://github.com/RobinMarchart/roll-bot
