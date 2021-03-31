@@ -189,7 +189,7 @@ impl<BB: BotBuilderWrapper + Send> BotManagerBuilder<BB> {
             match finished_sender.send(true) {
                 _ => {}
             }
-            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(15)).await;
             log::error!("Waiting for runtime shutdown timed out.");
             std::process::abort()
         });

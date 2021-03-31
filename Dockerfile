@@ -1,8 +1,16 @@
 FROM nouchka/sqlite3 AS db
 ADD ./bot-utils/migrations /sql-stmts
 RUN echo /sql-stmts/*/|sort|while read line;do cat $line/up.sql;done|sqlite3 /roll-bot.sqlite
-FROM scratch
-ADD --chown=0:0  ./target/x86_64-unknown-linux-musl/release/roll-bot /roll-bot
+FROM alpine as base
+RUN apk update && apk add sqlite
+FROM base as roll-bot
+RUN apk add rustup gcc musl-dev sqlite-dev
+RUN rustup-init -y --default-host x86_64-unknown-linux-musl --default-toolchain nightly --profile minimal
+ADD . /src
+RUN cd /src && /root/.cargo/bin/cargo build --release
+FROM base
+RUN apk add vim
+COPY --from=roll-bot --chown=0:0  /src/target/release/roll-bot /roll-bot
 VOLUME /config
 COPY --from=db --chown=0:0 /roll-bot.sqlite /roll-bot-db/roll-bot.sqlite
 VOLUME /roll-bot-db
