@@ -23,7 +23,12 @@ pub enum CommandResult {
     AddAlias,
     RemoveAlias(Result<(), ()>),
     ListAliases(Vec<(String, String)>),
-    Roll(Result<Vec<(i64, Vec<i64>)>, EvaluationErrors>, String),
+    Roll(
+        Vec<(Result<Vec<(i64, Vec<i64>)>, EvaluationErrors>, String)>,
+        bool,
+    ),
+    GetRollInfo(bool),
+    SetRollInfo,
     InsufficentPermission,
 }
 
@@ -41,8 +46,8 @@ impl<Id: storage::ClientId> ClientUtils<Id> {
         check_permission: Fn,
     ) -> Option<CommandResult> {
         match commands::parse_logging(message, id.clone(), &self.store).await {
-            Some(command) => Some(match command.0 {
-                commands::Command::Help => CommandResult::Help(command.1),
+            Some((command, command_prefix, roll_info)) => Some(match command {
+                commands::Command::Help => CommandResult::Help(command_prefix),
                 commands::Command::RollHelp => CommandResult::RollHelp,
                 commands::Command::Info => CommandResult::Info,
                 commands::Command::SetCommandPrefix(prefix) => {
@@ -53,7 +58,9 @@ impl<Id: storage::ClientId> ClientUtils<Id> {
                         CommandResult::InsufficentPermission
                     }
                 }
-                commands::Command::GetCommandPrefix => CommandResult::GetCommandPrefix(command.1),
+                commands::Command::GetCommandPrefix => {
+                    CommandResult::GetCommandPrefix(command_prefix)
+                }
                 commands::Command::AddRollPrefix(prefix) => {
                     if check_permission().await {
                         CommandResult::AddRollPrefix(self.store.add_roll_prefix(id, prefix).await)
@@ -96,14 +103,23 @@ impl<Id: storage::ClientId> ClientUtils<Id> {
                         .map(|(key, value)| (key, value.to_string()))
                         .collect(),
                 ),
-                commands::Command::AliasRoll(expr) => {
-                    let roll_str = format!("{}", &expr);
-                    CommandResult::Roll(self.roll.roll(expr).await, roll_str)
+                commands::Command::AliasRoll(expressions) => {
+                    let mut rolls = Vec::with_capacity(expressions.len());
+                    for expr in expressions {
+                        let roll_str = format!("{}", &expr);
+                        rolls.push((self.roll.roll(expr).await, roll_str));
+                    }
+                    CommandResult::Roll(rolls, roll_info)
                 }
                 commands::Command::Roll(expr) => {
                     let roll_str = format!("{}", &expr);
-                    CommandResult::Roll(self.roll.roll(expr).await, roll_str)
+                    CommandResult::Roll(vec![(self.roll.roll(expr).await, roll_str)], roll_info)
                 }
+                commands::Command::SetRollInfo(new) => {
+                    self.store.set_roll_info(id, new).await;
+                    CommandResult::SetRollInfo
+                }
+                commands::Command::GetRollInfo => CommandResult::GetRollInfo(roll_info),
             }),
             None => None,
         }

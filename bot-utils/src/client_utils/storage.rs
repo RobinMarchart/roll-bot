@@ -174,8 +174,8 @@ enum StorageOps {
     GetRollInfo(oneshot::Sender<bool>),
     SetRollInfo(bool, oneshot::Sender<()>),
     Get(
-        String,
-        oneshot::Sender<(String, Vec<String>, Option<Arc<Expression>>)>,
+        Vec<String>,
+        oneshot::Sender<(String, Vec<String>, Vec<Arc<Expression>>, bool)>,
     ),
 }
 
@@ -373,12 +373,19 @@ fn run_cmd(client: &mut ClientInformation, op: StorageOps) -> bool {
                 .unwrap();
             true
         }
-        StorageOps::Get(message, channel) => {
+        StorageOps::Get(aliases, channel) => {
             channel
                 .send((
                     client.get_cmd_prefix().to_owned(),
                     client.get_roll_prefix().to_owned(),
-                    client.get_aliases().get(&message).map(|e| e.to_owned()),
+                    {
+                        let a = client.get_aliases();
+                        aliases
+                            .iter()
+                            .filter_map(|alias| a.get(alias).map(|a| a.to_owned()))
+                            .collect()
+                    },
+                    client.get_roll_info(),
                 ))
                 .unwrap();
             false
@@ -607,11 +614,11 @@ impl<Id: ClientId> StorageHandle<Id> {
     pub async fn get(
         &self,
         id: Id,
-        message: String,
-    ) -> (String, Vec<String>, Option<Arc<Expression>>) {
+        aliases: Vec<String>,
+    ) -> (String, Vec<String>, Vec<Arc<Expression>>, bool) {
         let (sender, receiver) = oneshot::channel();
         self.sender
-            .send((id, StorageOps::Get(message, sender)))
+            .send((id, StorageOps::Get(aliases, sender)))
             .await
             .unwrap();
         receiver.await.unwrap()

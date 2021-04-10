@@ -94,6 +94,8 @@ mod permissions;
 use permissions::insufficent_permissions;
 mod info;
 use info::info;
+mod roll_info;
+use roll_info::{get_roll_info, set_roll_info};
 
 async fn respond(
     context: serenity::client::Context,
@@ -121,7 +123,9 @@ async fn respond(
         CommandResult::AddAlias => add_alias(context, message).await,
         CommandResult::RemoveAlias(result) => remove_alias(context, message, result).await,
         CommandResult::ListAliases(aliases) => list_aliases(context, message, aliases).await,
-        CommandResult::Roll(res, expr) => roll(context, message, res, expr).await,
+        CommandResult::Roll(rolls, info) => roll(&context, message, rolls, info).await,
         CommandResult::InsufficentPermission => insufficent_permissions(context, message).await,
+        CommandResult::GetRollInfo(info) => get_roll_info(context, message, info).await,
+        CommandResult::SetRollInfo => set_roll_info(context, message).await,
     }
 }
