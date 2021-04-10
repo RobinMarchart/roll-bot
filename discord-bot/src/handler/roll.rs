@@ -21,6 +21,27 @@ pub(crate) async fn roll(
                                 .reduce(|r1, r2| format!("{}, {}", r1, r2))
                                 .unwrap_or(" ".to_string())
                         ));
+                        if extended_info
+                            && r.len() < 11
+                            && r.get(0).map_or(false, |r| r.1.len() < 21)
+                        {
+                            m.embed(|e| {
+                                e.description(
+                                    r.iter()
+                                        .map(|r| {
+                                            format!(
+                                                "[{}]",
+                                                r.1.iter()
+                                                    .map(|r| format!("`{}`", r))
+                                                    .reduce(|r1, r2| format!("{}, {}", r1, r2))
+                                                    .unwrap_or(" ".to_string())
+                                            )
+                                        })
+                                        .reduce(|r1, r2| format!("{}\n{}", r1, r2))
+                                        .unwrap(),
+                                )
+                            });
+                        }
                     }
                     Err(e) => {
                         m.content(match e {
