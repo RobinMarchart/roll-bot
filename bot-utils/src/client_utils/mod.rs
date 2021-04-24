@@ -1,14 +1,43 @@
-pub use robins_dice_roll::dice_roll::EvaluationErrors;
+pub use robins_dice_roll::dice_roll::{EvaluationErrors, ExpressionEvaluate};
 
 pub mod commands;
 pub mod rolls;
 pub mod storage;
 
 use rolls::RollExecutor;
+use serde::{Deserialize, Serialize};
 use std::{future::Future, sync::Arc};
 pub use storage::ClientId;
 use storage::{GlobalStorage, StorageHandle};
 use tokio::task::JoinHandle;
+
+use robins_dice_roll::dice_types::{Expression, LabeledExpression};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum VersionedRollExpr {
+    V1(Expression),
+    V2(LabeledExpression),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct RollExprResult {
+    pub roll: Result<Vec<(i64, Vec<i64>)>, EvaluationErrors>,
+    pub text: String,
+    pub label: Option<String>,
+}
+
+impl std::fmt::Display for VersionedRollExpr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VersionedRollExpr::V1(e) => {
+                write!(f, "{}", e)
+            }
+            VersionedRollExpr::V2(e) => {
+                write!(f, "{}", e)
+            }
+        }
+    }
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum CommandResult {
@@ -23,10 +52,7 @@ pub enum CommandResult {
     AddAlias,
     RemoveAlias(Result<(), ()>),
     ListAliases(Vec<(String, String)>),
-    Roll(
-        Vec<(Result<Vec<(i64, Vec<i64>)>, EvaluationErrors>, String)>,
-        bool,
-    ),
+    Roll(Vec<RollExprResult>, bool),
     GetRollInfo(bool),
     SetRollInfo,
     InsufficentPermission,
@@ -106,14 +132,12 @@ impl<Id: storage::ClientId> ClientUtils<Id> {
                 commands::Command::AliasRoll(expressions) => {
                     let mut rolls = Vec::with_capacity(expressions.len());
                     for expr in expressions {
-                        let roll_str = format!("{}", &expr);
-                        rolls.push((self.roll.roll(expr).await, roll_str));
+                        rolls.push(self.roll.roll(expr).await);
                     }
                     CommandResult::Roll(rolls, roll_info)
                 }
                 commands::Command::Roll(expr) => {
-                    let roll_str = format!("{}", &expr);
-                    CommandResult::Roll(vec![(self.roll.roll(expr).await, roll_str)], roll_info)
+                    CommandResult::Roll(vec![self.roll.roll(expr).await], roll_info)
                 }
                 commands::Command::SetRollInfo(new) => {
                     self.store.set_roll_info(id, new).await;

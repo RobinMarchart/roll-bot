@@ -13,7 +13,6 @@
  */
 
 use diesel::prelude::*;
-use robins_dice_roll::dice_types::Expression;
 use serde::{de::DeserializeOwned, Serialize};
 use std::hash::Hash;
 use std::sync::Arc;
@@ -23,6 +22,7 @@ use tokio::{
     task::spawn,
 };
 mod schema;
+use super::VersionedRollExpr;
 use cached::{Cached, SizedCache};
 mod cc {
     use super::schema::client_config;
@@ -88,7 +88,7 @@ struct Client<'s, Id: ClientId> {
 struct ClientInformation {
     source: ClientConfig,
     roll_prefix: Vec<String>,
-    aliases: HashMap<String, Arc<Expression>>,
+    aliases: HashMap<String, Arc<VersionedRollExpr>>,
     command_prefix_changed: bool,
     roll_prefix_changed: bool,
     aliases_changed: bool,
@@ -144,10 +144,10 @@ impl ClientInformation {
         self.roll_prefix_changed = true;
         &mut self.roll_prefix
     }
-    fn get_aliases(&self) -> &HashMap<String, Arc<Expression>> {
+    fn get_aliases(&self) -> &HashMap<String, Arc<VersionedRollExpr>> {
         &self.aliases
     }
-    fn get_aliases_mut(&mut self) -> &mut HashMap<String, Arc<Expression>> {
+    fn get_aliases_mut(&mut self) -> &mut HashMap<String, Arc<VersionedRollExpr>> {
         self.aliases_changed = true;
         &mut self.aliases
     }
@@ -167,15 +167,15 @@ enum StorageOps {
     GetRollPrefixes(oneshot::Sender<Vec<String>>),
     AddRollPrefix(String, oneshot::Sender<Result<(), ()>>),
     RemoveRollPrefix(String, oneshot::Sender<Result<(), ()>>),
-    GetAllAlias(oneshot::Sender<HashMap<String, Arc<Expression>>>),
-    GetAlias(String, oneshot::Sender<Option<Arc<Expression>>>),
-    AddAlias(String, Expression, oneshot::Sender<Result<(), ()>>),
+    GetAllAlias(oneshot::Sender<HashMap<String, Arc<VersionedRollExpr>>>),
+    GetAlias(String, oneshot::Sender<Option<Arc<VersionedRollExpr>>>),
+    AddAlias(String, VersionedRollExpr, oneshot::Sender<Result<(), ()>>),
     RemoveAlias(String, oneshot::Sender<Result<(), ()>>),
     GetRollInfo(oneshot::Sender<bool>),
     SetRollInfo(bool, oneshot::Sender<()>),
     Get(
         Vec<String>,
-        oneshot::Sender<(String, Vec<String>, Vec<Arc<Expression>>, bool)>,
+        oneshot::Sender<(String, Vec<String>, Vec<Arc<VersionedRollExpr>>, bool)>,
     ),
 }
 
@@ -563,7 +563,12 @@ impl<Id: ClientId> StorageHandle<Id> {
             .unwrap();
         receiver.await.unwrap()
     }
-    pub async fn add_alias(&self, id: Id, alias: String, expr: Expression) -> Result<(), ()> {
+    pub async fn add_alias(
+        &self,
+        id: Id,
+        alias: String,
+        expr: VersionedRollExpr,
+    ) -> Result<(), ()> {
         let (sender, receiver) = oneshot::channel();
         self.sender
             .send((id, StorageOps::AddAlias(alias, expr, sender)))
@@ -579,7 +584,7 @@ impl<Id: ClientId> StorageHandle<Id> {
             .unwrap();
         receiver.await.unwrap()
     }
-    pub async fn get_alias(&self, id: Id, alias: String) -> Option<Arc<Expression>> {
+    pub async fn get_alias(&self, id: Id, alias: String) -> Option<Arc<VersionedRollExpr>> {
         let (sender, receiver) = oneshot::channel();
         self.sender
             .send((id, StorageOps::GetAlias(alias, sender)))
@@ -587,7 +592,7 @@ impl<Id: ClientId> StorageHandle<Id> {
             .unwrap();
         receiver.await.unwrap()
     }
-    pub async fn get_all_alias(&self, id: Id) -> HashMap<String, Arc<Expression>> {
+    pub async fn get_all_alias(&self, id: Id) -> HashMap<String, Arc<VersionedRollExpr>> {
         let (sender, receiver) = oneshot::channel();
         self.sender
             .send((id, StorageOps::GetAllAlias(sender)))
@@ -615,7 +620,7 @@ impl<Id: ClientId> StorageHandle<Id> {
         &self,
         id: Id,
         aliases: Vec<String>,
-    ) -> (String, Vec<String>, Vec<Arc<Expression>>, bool) {
+    ) -> (String, Vec<String>, Vec<Arc<VersionedRollExpr>>, bool) {
         let (sender, receiver) = oneshot::channel();
         self.sender
             .send((id, StorageOps::Get(aliases, sender)))

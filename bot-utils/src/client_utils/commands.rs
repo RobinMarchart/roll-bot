@@ -1,4 +1,7 @@
-use super::storage::{ClientId, StorageHandle};
+pub use super::{
+    storage::{ClientId, StorageHandle},
+    VersionedRollExpr,
+};
 use nom::{
     branch::alt,
     bytes::complete::{tag, tag_no_case},
@@ -8,7 +11,7 @@ use nom::{
     sequence::{delimited, pair, preceded, terminated},
     IResult,
 };
-use robins_dice_roll::{dice_types::Expression, parser};
+use robins_dice_roll::{dice_types::LabeledExpression, parser};
 use std::sync::Arc;
 use unicode_categories::UnicodeCategories;
 
@@ -24,11 +27,11 @@ pub enum Command {
     AddRollPrefix(String),
     RemoveRollPrefix(String),
     ListRollPrefix,
-    AddAlias(String, Expression),
+    AddAlias(String, VersionedRollExpr),
     RemoveAlias(String),
     ListAliases,
-    AliasRoll(Vec<Arc<Expression>>),
-    Roll(Expression),
+    AliasRoll(Vec<Arc<VersionedRollExpr>>),
+    Roll(VersionedRollExpr),
 }
 
 fn chars_set(input: &str) -> IResult<&str, char> {
@@ -121,7 +124,9 @@ fn parse_roll_prefix(input: &str) -> IResult<&str, Command> {
 fn parse_roll_command(input: &str) -> IResult<&str, Command> {
     preceded(
         pair(alt((tag_no_case("roll"), tag_no_case("r"))), multispace0),
-        map(parser::parse_expression, |e| Command::Roll(e)),
+        map(parser::parse_labeled, |e| {
+            Command::Roll(VersionedRollExpr::V2(e))
+        }),
     )(input)
 }
 
@@ -134,9 +139,11 @@ fn parse_alias(input: &str) -> IResult<&str, Command> {
                 map(
                     pair(
                         terminated(recognize(many1(chars_set)), multispace1),
-                        parser::parse_expression,
+                        parser::parse_labeled,
                     ),
-                    |(alias, expr)| Command::AddAlias(alias.to_owned(), expr),
+                    |(alias, expr)| {
+                        Command::AddAlias(alias.to_owned(), VersionedRollExpr::V2(expr))
+                    },
                 ),
             ),
             preceded(
@@ -214,10 +221,10 @@ fn parse_roll<'a>(input: &'a str, prefix: &str) -> IResult<&'a str, Command> {
     map(
         delimited(
             pair(tag(prefix), multispace0),
-            parser::parse_expression,
+            parser::parse_labeled,
             pair(multispace0, eof),
         ),
-        |e| Command::Roll(e),
+        |e| Command::Roll(VersionedRollExpr::V2(e)),
     )(input)
 }
 
@@ -283,7 +290,12 @@ mod tests {
     fn test_parse_command() {
         assert_eq!(
             parse_command("! roll 1", "!"),
-            Ok(("", Command::Roll(Expression::Simple(Term::Constant(1)))))
+            Ok((
+                "",
+                Command::Roll(VersionedRollExpr::V2(LabeledExpression::Unlabeled(
+                    Expression::Simple(Term::Constant(1))
+                )))
+            ))
         );
         assert_eq!(
             parse_command("!cp set !", "!"),
@@ -295,14 +307,17 @@ mod tests {
         );
 
         assert_eq!(
-            parse_command("! r 1d4", "!"),
+            parse_command("! r 1d4#label", "!"),
             Ok((
                 "",
-                Command::Roll(Expression::Simple(Term::DiceThrow(
-                    SelectedDice::Unchanged(FilteredDice::Simple(Dice {
-                        throws: 1,
-                        dice: DiceType::Number(4)
-                    }))
+                Command::Roll(VersionedRollExpr::V2(LabeledExpression::Labeled(
+                    Expression::Simple(Term::DiceThrow(SelectedDice::Unchanged(
+                        FilteredDice::Simple(Dice {
+                            throws: 1,
+                            dice: DiceType::Number(4)
+                        })
+                    ))),
+                    "label".to_string()
                 )))
             ))
         );
@@ -312,7 +327,7 @@ mod tests {
     fn test_chars_set() {
         assert_eq!(chars_set("ä"), Ok(("", 'ä')));
         assert_eq!(chars_set(":"), Ok(("", ':')));
-        assert_eq!(chars_set("$"), Ok(("", '$')));
+        assert_eq!(chars_set("%"), Ok(("", '%')));
         assert_eq!(chars_set("✅"), Ok(("", '✅')));
     }
 }

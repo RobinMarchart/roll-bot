@@ -14,7 +14,7 @@ Copyright 2021 Robin Marchart
    limitations under the License.
 */
 
-use std::fmt;
+use std::fmt::{self, Debug};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -219,6 +219,26 @@ impl fmt::Display for Expression {
             }
             Expression::List(n, t) => {
                 write!(f, "{}{{{}}}", n, t)
+            }
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum LabeledExpression {
+    Unlabeled(Expression),
+    Labeled(Expression, String),
+}
+
+impl fmt::Display for LabeledExpression {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LabeledExpression::Unlabeled(e) => {
+                write!(f, "{}", e)
+            }
+            LabeledExpression::Labeled(e, l) => {
+                write!(f, "{}#{}", e, l)
             }
         }
     }

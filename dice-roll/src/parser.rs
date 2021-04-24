@@ -14,16 +14,20 @@ Copyright 2021 Robin Marchart
    limitations under the License.
 */
 
-use crate::dice_types::{
-    Dice, DiceType, Expression, Filter, FilteredDice, Operation, SelectedDice, Selector, Term,
+use crate::{
+    dice_types::{
+        Dice, DiceType, Expression, Filter, FilteredDice, Operation, SelectedDice, Selector, Term,
+    },
+    LabeledExpression,
 };
 
 use nom::{
     branch::alt,
     bytes::complete::{tag, tag_no_case},
-    character::complete::{digit1, multispace0},
-    combinator::{map, map_res, recognize, success, verify},
+    character::complete::{digit1, multispace0, satisfy},
+    combinator::{map, map_res, opt, recognize, success, verify},
     error::context,
+    multi::{many0, many1},
     sequence::{delimited, pair, preceded, terminated, tuple},
     IResult,
 };
@@ -213,6 +217,34 @@ pub fn parse_expression(input: &str) -> IResult<&str, Expression> {
         ),
         map(parse_rearanged_term, |term| Expression::Simple(term)),
     ))(input)
+}
+
+pub fn parse_labeled(input: &str) -> IResult<&str, LabeledExpression> {
+    map(
+        pair(
+            parse_expression,
+            opt(preceded(
+                pair(tag("#"), multispace0),
+                map(
+                    many0(terminated(
+                        recognize(many1(satisfy(|c| !(c.is_whitespace() || c == '\n')))),
+                        multispace0,
+                    )),
+                    |labels: Vec<&str>| {
+                        labels
+                            .iter()
+                            .map(|s| s.to_string())
+                            .reduce(|l1, l2| format!("{} {}", l1, l2))
+                            .unwrap_or("".to_string())
+                    },
+                ),
+            )),
+        ),
+        |r| match r {
+            (e, Some(l)) => LabeledExpression::Labeled(e, l),
+            (e, None) => LabeledExpression::Unlabeled(e),
+        },
+    )(input)
 }
 
 #[cfg(test)]

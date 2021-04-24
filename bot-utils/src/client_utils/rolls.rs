@@ -3,10 +3,11 @@ use rand_chacha::ChaCha20Rng;
 use rand_xoshiro::Xoshiro256PlusPlus;
 use robins_dice_roll::{
     dice_roll::{EvaluationErrors, ExpressionEvaluate},
-    dice_types::Expression,
+    LabeledExpression,
 };
 use std::{
     borrow::Borrow,
+    fmt::format,
     result::Result,
     sync::{atomic::AtomicBool, Arc},
     time::Duration,
@@ -132,10 +133,11 @@ impl RollExecutor {
         )
     }
 
-    pub async fn roll<Expr>(&self, expr: Expr) -> Result<Vec<(i64, Vec<i64>)>, EvaluationErrors>
+    pub async fn roll<Expr>(&self, expr: Expr) -> super::RollExprResult
     where
-        Expr: Borrow<Expression> + Sized + Send + 'static,
+        Expr: Borrow<super::VersionedRollExpr> + Sized + Send + 'static,
     {
+        let text = format!("{}", expr.borrow());
         let (result_sender, result_receiver) = oneshot::channel();
         let (time_sender, time_receiver) = oneshot::channel();
         let timeout_signal = Arc::new(AtomicBool::new(false));
@@ -149,12 +151,36 @@ impl RollExecutor {
         self.pool.execute(move || {
             time_sender.send(Instant::now()).unwrap();
             let mut rng = rng;
-            result_sender
-                .send(expr.borrow().evaluate(
-                    &mut move || timeout_signal.load(std::sync::atomic::Ordering::Relaxed),
-                    &mut rng,
-                ))
-                .unwrap();
+            result_sender.send(match expr.borrow() {
+                super::VersionedRollExpr::V1(e) => super::RollExprResult {
+                    roll: e.evaluate(
+                        &mut move || timeout_signal.load(std::sync::atomic::Ordering::Relaxed),
+                        &mut rng,
+                    ),
+                    text,
+                    label: None,
+                },
+                super::VersionedRollExpr::V2(LabeledExpression::Unlabeled(e)) => {
+                    super::RollExprResult {
+                        roll: e.evaluate(
+                            &mut move || timeout_signal.load(std::sync::atomic::Ordering::Relaxed),
+                            &mut rng,
+                        ),
+                        text,
+                        label: None,
+                    }
+                }
+                super::VersionedRollExpr::V2(LabeledExpression::Labeled(e, l)) => {
+                    super::RollExprResult {
+                        roll: e.evaluate(
+                            &mut move || timeout_signal.load(std::sync::atomic::Ordering::Relaxed),
+                            &mut rng,
+                        ),
+                        text,
+                        label: Some(l.to_owned()),
+                    }
+                }
+            });
         });
         let timeout_clone = self.timeout.clone();
         spawn(async move {
