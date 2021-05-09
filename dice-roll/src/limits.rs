@@ -16,9 +16,9 @@ impl DiceLimits for DiceType {
 
     fn max(&self) -> i64 {
         match self {
-            DiceType::Number(n) => n.clone().into(),
+            DiceType::Number(n) => (*n).into(),
             DiceType::Fudge => 1,
-            DiceType::Multiply(n) => i64::from(n.clone()) * i64::from(n.clone().clone()),
+            DiceType::Multiply(n) => i64::from(*n) * i64::from(*n),
         }
     }
 }
@@ -58,7 +58,7 @@ impl DiceLimits for SelectedDice {
                 }
                 .dice
                 .min()
-                    * i64::from(n.clone())
+                    * i64::from(*n)
             }
         }
     }
@@ -73,7 +73,7 @@ impl DiceLimits for SelectedDice {
                 }
                 .dice
                 .max()
-                    * i64::from(n.clone())
+                    * i64::from(*n)
             }
         }
     }

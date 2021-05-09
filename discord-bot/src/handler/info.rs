@@ -6,7 +6,7 @@ pub(crate) async fn info(
     if let Err(e) = message
         .channel_id
         .send_message(&context, |m| {
-            m.reference_message((message.channel_id.clone(), message.id.clone()))
+            m.reference_message((message.channel_id, message.id))
                 .allowed_mentions(|m| m.empty_users())
                 .embed(|e| {
                     e.title("**INFO**").field(
@@ -17,5 +17,7 @@ pub(crate) async fn info(
                 })
         })
         .await
-    {}
+    {
+        log::warn!("Unable to reply to message {}: {}", message.id, e)
+    }
 }

@@ -186,9 +186,7 @@ impl<BB: BotBuilderWrapper + Send> BotManagerBuilder<BB> {
                     _ => log::info!("Received Ctrl-C: Shutting down"),
                 }
             }
-            match finished_sender.send(true) {
-                _ => {}
-            }
+            finished_sender.send(true).unwrap();
             tokio::time::sleep(std::time::Duration::from_secs(15)).await;
             log::error!("Waiting for runtime shutdown timed out.");
             std::process::abort()

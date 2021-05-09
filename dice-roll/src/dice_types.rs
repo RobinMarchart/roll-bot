@@ -237,8 +237,8 @@ impl fmt::Display for LabeledExpression {
             LabeledExpression::Unlabeled(e) => {
                 write!(f, "{}", e)
             }
-            LabeledExpression::Labeled(e, l) => {
-                write!(f, "{}#{}", e, l)
+            LabeledExpression::Labeled(e, _) => {
+                write!(f, "{}", e)
             }
         }
     }

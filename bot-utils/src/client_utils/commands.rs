@@ -11,7 +11,7 @@ use nom::{
     sequence::{delimited, pair, preceded, terminated},
     IResult,
 };
-use robins_dice_roll::{dice_types::LabeledExpression, parser};
+use robins_dice_roll::parser;
 use std::sync::Arc;
 use unicode_categories::UnicodeCategories;
 
@@ -188,7 +188,7 @@ fn parse_roll_info(input: &str) -> IResult<&str, Command> {
                         ),
                     )),
                 ),
-                |n| Command::SetRollInfo(n),
+                Command::SetRollInfo,
             ),
         )),
     )(input)
@@ -228,7 +228,7 @@ fn parse_roll<'a>(input: &'a str, prefix: &str) -> IResult<&'a str, Command> {
     )(input)
 }
 
-fn parse_extra_aliases<'a>(input: &'a str) -> IResult<&'a str, Vec<String>> {
+fn parse_extra_aliases(input: &str) -> IResult<&str, Vec<String>> {
     many0(map(
         preceded(
             many0(satisfy(|c| c != '$')),
@@ -247,7 +247,7 @@ pub async fn parse<Id: ClientId>(
         .get(id.clone(), {
             let mut parsed = parse_extra_aliases(string)
                 .map(|a| a.1)
-                .unwrap_or_else(|_| vec![]);
+                .unwrap_or_else(|_| Vec::new());
             parsed.push(string.to_string());
             parsed
         })

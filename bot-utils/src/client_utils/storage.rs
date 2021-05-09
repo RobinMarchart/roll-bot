@@ -152,7 +152,7 @@ impl ClientInformation {
         &mut self.aliases
     }
     fn get_roll_info(&self) -> bool {
-        self.source.roll_info.clone()
+        self.source.roll_info
     }
     fn get_roll_info_mut(&mut self) -> &mut bool {
         self.roll_info_changed = true;
@@ -180,7 +180,7 @@ enum StorageOps {
 }
 
 pub(crate) struct GlobalStorage {
-    db_submit: mpsc::Sender<Box<dyn Send + FnOnce(&SqliteConnection) -> ()>>,
+    db_submit: mpsc::Sender<Box<dyn Send + FnOnce(&SqliteConnection)>>,
 }
 
 impl GlobalStorage {
@@ -252,13 +252,15 @@ impl GlobalStorage {
             },
             aliases: if config.aliases_changed {
                 config.aliases_changed = false;
-                Some(serde_json::to_string(&config.aliases).unwrap_or("{}".to_string()))
+                Some(serde_json::to_string(&config.aliases).unwrap_or_else(|_| "{}".to_string()))
             } else {
                 None
             },
             roll_prefix: if config.roll_prefix_changed {
                 config.roll_prefix_changed = false;
-                Some(serde_json::to_string(&config.roll_prefix).unwrap_or("[]".to_string()))
+                Some(
+                    serde_json::to_string(&config.roll_prefix).unwrap_or_else(|_| "[]".to_string()),
+                )
             } else {
                 None
             },
@@ -301,7 +303,8 @@ fn run_cmd(client: &mut ClientInformation, op: StorageOps) -> bool {
             false
         }
         StorageOps::SetCommandPrefix(prefix, channel) => {
-            channel.send(*client.get_cmd_prefix_mut() = prefix).unwrap();
+            *client.get_cmd_prefix_mut() = prefix;
+            channel.send(()).unwrap();
             true
         }
         StorageOps::GetRollPrefixes(channel) => {
@@ -313,7 +316,8 @@ fn run_cmd(client: &mut ClientInformation, op: StorageOps) -> bool {
                 .send(if client.get_roll_prefix().contains(&prefix) {
                     Err(())
                 } else {
-                    Ok(client.get_roll_prefix_mut().push(prefix))
+                    client.get_roll_prefix_mut().push(prefix);
+                    Ok(())
                 })
                 .unwrap();
             true
@@ -395,7 +399,8 @@ fn run_cmd(client: &mut ClientInformation, op: StorageOps) -> bool {
             false
         }
         StorageOps::SetRollInfo(new, channel) => {
-            channel.send(*client.get_roll_info_mut() = new).unwrap();
+            *client.get_roll_info_mut() = new;
+            channel.send(()).unwrap();
             true
         }
     }

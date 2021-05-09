@@ -40,9 +40,9 @@ pub fn parse_dice_type(input: &str) -> IResult<&str, DiceType> {
     alt((
         map(
             terminated(parse_u32, terminated(multispace0, tag_no_case("x"))),
-            |input: u32| DiceType::Multiply(input),
+            DiceType::Multiply,
         ),
-        map(parse_u32, |input: u32| DiceType::Number(input)),
+        map(parse_u32, DiceType::Number),
         map(tag_no_case("f"), |_| DiceType::Fudge),
         map(tag("%"), |_| DiceType::Number(100)),
     ))(input)
@@ -52,7 +52,7 @@ pub fn parse_u32(input: &str) -> IResult<&str, u32> {
     context(
         "Failed to parse integer between 1 and 4294967295 inclusive",
         verify(
-            map_res(digit1, |s: &str| u32::from_str_radix(s, 10)),
+            map_res(digit1, |s: &str| s.parse::<u32>()),
             |value: &u32| value > &0,
         ),
     )(input)
@@ -61,7 +61,7 @@ pub fn parse_u32(input: &str) -> IResult<&str, u32> {
 pub fn parse_i64(input: &str) -> IResult<&str, i64> {
     map_res(
         recognize(pair(alt((tag("+"), tag("-"), success(""))), digit1)),
-        |s: &str| i64::from_str_radix(s, 10),
+        |s: &str| s.parse::<i64>(),
     )(input)
 }
 
@@ -98,7 +98,7 @@ pub fn parse_filtered_dice(input: &str) -> IResult<&str, FilteredDice> {
             )),
             |res| FilteredDice::Filtered(res.0, res.1, res.2),
         ),
-        map(parse_dice, |dice: Dice| FilteredDice::Simple(dice)),
+        map(parse_dice, FilteredDice::Simple),
     ))(input)
 }
 
@@ -121,7 +121,7 @@ pub fn parse_selected_dice(input: &str) -> IResult<&str, SelectedDice> {
             )),
             |select| SelectedDice::Selected(select.0, select.1, select.2),
         ),
-        map(parse_filtered_dice, |dice| SelectedDice::Unchanged(dice)),
+        map(parse_filtered_dice, SelectedDice::Unchanged),
     ))(input)
 }
 
@@ -135,7 +135,7 @@ pub fn parse_term(input: &str) -> IResult<&str, Term> {
 }
 
 pub fn parse_term_constant(input: &str) -> IResult<&str, Term> {
-    map(parse_i64, |i| Term::Constant(i))(input)
+    map(parse_i64, Term::Constant)(input)
 }
 
 pub fn parse_term_subterm(input: &str) -> IResult<&str, Term> {
@@ -150,7 +150,7 @@ pub fn parse_term_subterm(input: &str) -> IResult<&str, Term> {
 }
 
 pub fn parse_term_roll(input: &str) -> IResult<&str, Term> {
-    map(parse_selected_dice, |dice| Term::DiceThrow(dice))(input)
+    map(parse_selected_dice, Term::DiceThrow)(input)
 }
 
 pub fn parse_operator(input: &str) -> IResult<&str, Operation> {
@@ -196,7 +196,7 @@ fn rearange_term(root: Term) -> Term {
 }
 
 pub fn parse_rearanged_term(input: &str) -> IResult<&str, Term> {
-    map(parse_term, |term: Term| rearange_term(term))(input)
+    map(parse_term, rearange_term)(input)
 }
 
 pub fn parse_expression(input: &str) -> IResult<&str, Expression> {
@@ -215,7 +215,7 @@ pub fn parse_expression(input: &str) -> IResult<&str, Expression> {
             ),
             |list| Expression::List(list.0, list.1),
         ),
-        map(parse_rearanged_term, |term| Expression::Simple(term)),
+        map(parse_rearanged_term, Expression::Simple),
     ))(input)
 }
 
@@ -235,7 +235,7 @@ pub fn parse_labeled(input: &str) -> IResult<&str, LabeledExpression> {
                             .iter()
                             .map(|s| s.to_string())
                             .reduce(|l1, l2| format!("{} {}", l1, l2))
-                            .unwrap_or("".to_string())
+                            .unwrap_or_else(|| "".to_string())
                     },
                 ),
             )),

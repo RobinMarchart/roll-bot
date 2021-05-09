@@ -6,8 +6,7 @@ async fn main() {
     pretty_env_logger::init();
     log::info!("logger created");
     let config_path = std::env::args()
-        .skip(1)
-        .next()
+        .nth(1)
         .expect("missing first command line argument with config file");
     BotManagerBuilder::new(config_path, DiscordBotConfig {})
         .build_async()

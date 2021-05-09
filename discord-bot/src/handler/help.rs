@@ -4,7 +4,7 @@ pub(crate) async fn help(
     prefix: String,
 ) {
     if let Err(err) = message.channel_id.send_message(&context, |m| {
-                m.reference_message((message.channel_id.clone(),message.id.clone()))
+                m.reference_message((message.channel_id,message.id))
                     .allowed_mentions(|mentions|mentions.empty_users())
                  .embed(|e|{
                      e.title("Command Syntax")

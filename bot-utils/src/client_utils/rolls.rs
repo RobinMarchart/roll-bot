@@ -1,14 +1,9 @@
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use rand_xoshiro::Xoshiro256PlusPlus;
-use robins_dice_roll::{
-    dice_roll::{EvaluationErrors, ExpressionEvaluate},
-    LabeledExpression,
-};
+use robins_dice_roll::{dice_roll::ExpressionEvaluate, LabeledExpression};
 use std::{
     borrow::Borrow,
-    fmt::format,
-    result::Result,
     sync::{atomic::AtomicBool, Arc},
     time::Duration,
 };
@@ -24,7 +19,7 @@ use rusty_pool::{Builder, ThreadPool};
 #[derive(Debug)]
 enum RngProviderOps {
     GetRng(oneshot::Sender<Xoshiro256PlusPlus>),
-    SetCryptoRng(ChaCha20Rng),
+    SetCryptoRng(Box<ChaCha20Rng>),
 }
 
 struct RngProvider {
@@ -34,20 +29,14 @@ struct RngProvider {
 
 impl RngProvider {
     pub async fn run(&mut self) {
-        loop {
-            match self.receiver.recv().await {
-                Some(op) => match op {
-                    RngProviderOps::GetRng(channel) => {
-                        let mut seed: <Xoshiro256PlusPlus as SeedableRng>::Seed =
-                            Default::default();
-                        self.rng.fill(&mut seed);
-                        channel.send(Xoshiro256PlusPlus::from_seed(seed)).unwrap()
-                    }
-                    RngProviderOps::SetCryptoRng(rng) => self.rng = rng,
-                },
-                None => {
-                    break;
+        while let Some(op) = self.receiver.recv().await {
+            match op {
+                RngProviderOps::GetRng(channel) => {
+                    let mut seed: <Xoshiro256PlusPlus as SeedableRng>::Seed = Default::default();
+                    self.rng.fill(&mut seed);
+                    channel.send(Xoshiro256PlusPlus::from_seed(seed)).unwrap()
                 }
+                RngProviderOps::SetCryptoRng(rng) => self.rng = *rng,
             }
         }
     }
@@ -70,7 +59,7 @@ async fn start_rng_provider<Stop: StopListener>(
     (
         spawn(async move {
             tokio::select! {
-                _ = sleep(rng_reseed.clone())=>{
+                _ = sleep(rng_reseed)=>{
 
                 }
                 _ = stop.wait_stop()=>{
@@ -85,7 +74,7 @@ async fn start_rng_provider<Stop: StopListener>(
                 tokio::select! {
                     _ = interval.tick()=>{
                         match sender_clone
-                    .send(RngProviderOps::SetCryptoRng(ChaCha20Rng::from_entropy()))
+                    .send(RngProviderOps::SetCryptoRng(Box::from(ChaCha20Rng::from_entropy())))
                     .await
                 {
                     Ok(_) => {}
@@ -151,38 +140,44 @@ impl RollExecutor {
         self.pool.execute(move || {
             time_sender.send(Instant::now()).unwrap();
             let mut rng = rng;
-            result_sender.send(match expr.borrow() {
-                super::VersionedRollExpr::V1(e) => super::RollExprResult {
-                    roll: e.evaluate(
-                        &mut move || timeout_signal.load(std::sync::atomic::Ordering::Relaxed),
-                        &mut rng,
-                    ),
-                    text,
-                    label: None,
-                },
-                super::VersionedRollExpr::V2(LabeledExpression::Unlabeled(e)) => {
-                    super::RollExprResult {
+            result_sender
+                .send(match expr.borrow() {
+                    super::VersionedRollExpr::V1(e) => super::RollExprResult {
                         roll: e.evaluate(
                             &mut move || timeout_signal.load(std::sync::atomic::Ordering::Relaxed),
                             &mut rng,
                         ),
                         text,
                         label: None,
+                    },
+                    super::VersionedRollExpr::V2(LabeledExpression::Unlabeled(e)) => {
+                        super::RollExprResult {
+                            roll: e.evaluate(
+                                &mut move || {
+                                    timeout_signal.load(std::sync::atomic::Ordering::Relaxed)
+                                },
+                                &mut rng,
+                            ),
+                            text,
+                            label: None,
+                        }
                     }
-                }
-                super::VersionedRollExpr::V2(LabeledExpression::Labeled(e, l)) => {
-                    super::RollExprResult {
-                        roll: e.evaluate(
-                            &mut move || timeout_signal.load(std::sync::atomic::Ordering::Relaxed),
-                            &mut rng,
-                        ),
-                        text,
-                        label: Some(l.to_owned()),
+                    super::VersionedRollExpr::V2(LabeledExpression::Labeled(e, l)) => {
+                        super::RollExprResult {
+                            roll: e.evaluate(
+                                &mut move || {
+                                    timeout_signal.load(std::sync::atomic::Ordering::Relaxed)
+                                },
+                                &mut rng,
+                            ),
+                            text,
+                            label: Some(l.to_owned()),
+                        }
                     }
-                }
-            });
+                })
+                .unwrap();
         });
-        let timeout_clone = self.timeout.clone();
+        let timeout_clone = self.timeout;
         spawn(async move {
             sleep_until(time_receiver.await.unwrap() + timeout_clone).await;
             timeout_signal_clone.store(true, std::sync::atomic::Ordering::Relaxed);

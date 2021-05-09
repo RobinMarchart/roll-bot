@@ -19,7 +19,7 @@ pub(crate) async fn roll(
                             r.iter()
                                 .map(|result| format!("`{}`", result.0))
                                 .reduce(|r1, r2| format!("{}, {}", r1, r2))
-                                .unwrap_or(" ".to_string())
+                                .unwrap_or_else(|| " ".to_string())
                         );
                         m.content(if let Some(l) = roll.label {
                             format!("**{}**\n{}", l, roll_line)
@@ -39,7 +39,7 @@ pub(crate) async fn roll(
                                                 r.1.iter()
                                                     .map(|r| format!("`{}`", r))
                                                     .reduce(|r1, r2| format!("{}, {}", r1, r2))
-                                                    .unwrap_or(" ".to_string())
+                                                    .unwrap_or_else(|| " ".to_string())
                                             )
                                         })
                                         .reduce(|r1, r2| format!("{}\n{}", r1, r2))

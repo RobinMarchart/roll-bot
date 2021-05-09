@@ -20,23 +20,21 @@ impl EventHandler for DiscordBotHandler {
         } else if let Some(guild) = message.guild_id {
             if let Some(response) = self
                 .guild_utils
-                .eval(guild.clone(), &message.content, || {
+                .eval(guild, &message.content, || {
                     check_priviledged_access(&ctx, &message)
                 })
                 .await
             {
                 respond(ctx, message, response, &self.invite_url).await;
             }
-        } else {
-            if let Some(response) = self
-                .dm_utils
-                .eval(message.author.id.clone(), &message.content, || {
-                    std::future::ready(true)
-                })
-                .await
-            {
-                respond(ctx, message, response, &self.invite_url).await;
-            }
+        } else if let Some(response) = self
+            .dm_utils
+            .eval(message.author.id, &message.content, || {
+                std::future::ready(true)
+            })
+            .await
+        {
+            respond(ctx, message, response, &self.invite_url).await;
         }
     }
 }
@@ -48,14 +46,9 @@ async fn check_priviledged_access(context: &serenity::client::Context, message: 
                 if g.owner_id == message.author.id {
                     true
                 } else {
-                    match g.member(&context, message.author.id.clone()).await {
+                    match g.member(&context, message.author.id).await {
                         Ok(member) => {
-                            for roll in member
-                                .roles
-                                .iter()
-                                .map(|id| g.roles.get(id))
-                                .filter_map(|x| x)
-                            {
+                            for roll in member.roles.iter().map(|id| g.roles.get(id)).flatten() {
                                 if roll.permissions.administrator() {
                                     return true;
                                 }
