@@ -1,6 +1,13 @@
 .github
+bot-utils/src
+bot-utils-macro
+dice-roll
+discord-bot
+roll-cmd
+src
 target/debug
 target/release
+target/x86_64-unknown-linux-musl/debug
 target/x86_64-unknown-linux-musl/release/build
 target/x86_64-unknown-linux-musl/release/deps
 target/x86_64-unknown-linux-musl/release/examples
