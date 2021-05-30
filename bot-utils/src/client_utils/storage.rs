@@ -14,9 +14,9 @@
 
 use diesel::prelude::*;
 use serde::{de::DeserializeOwned, Serialize};
-use std::hash::Hash;
-use std::sync::Arc;
+use std::{collections::hash_map::RandomState, hash::BuildHasher, sync::Arc};
 use std::{collections::HashMap, fmt};
+use std::{hash::Hash, usize};
 use tokio::{
     sync::{mpsc, oneshot},
     task::spawn,
@@ -24,6 +24,7 @@ use tokio::{
 mod schema;
 use super::VersionedRollExpr;
 use cached::{Cached, SizedCache};
+use parking_lot::{Mutex, MutexGuard, RwLock};
 mod cc {
     use super::schema::client_config;
     #[derive(Debug, Queryable, Clone, Identifiable, Insertable)]
@@ -288,12 +289,12 @@ impl GlobalStorage {
     }
 }
 
-struct ClientStorage<Id: ClientId> {
+struct ClientStorage<Id: ClientId, HB:BuildHasher+Default = RandomState> {
     client_type: String,
-    db_cache: SizedCache<Id, ClientInformation>,
-    query_cache: HashMap<Id, Vec<StorageOps>>,
+    db_cache: Arc<Vec<Mutex<SizedCache<Id, Arc<Mutex<ClientInformation>>>>>>,
+    query_cache: Arc<RwLock<HashMap<Id, Mutex<Vec<StorageOps>>>>>,
     global: Arc<GlobalStorage>,
-    receiver: mpsc::Receiver<(Id, StorageOps)>,
+    hash_builder: HB,
 }
 
 fn run_cmd(client: &mut ClientInformation, op: StorageOps) -> bool {
@@ -406,25 +407,33 @@ fn run_cmd(client: &mut ClientInformation, op: StorageOps) -> bool {
     }
 }
 
-impl<Id: ClientId> ClientStorage<Id> {
+impl<Id: ClientId,HB:BuildHasher+Default> ClientStorage<Id,HB> {
     fn new<S: ToString>(
         client_type: S,
         global: Arc<GlobalStorage>,
-        channel_size: usize,
+        cache_buckets: usize,
         cache_size: usize,
-    ) -> (ClientStorage<Id>, mpsc::Sender<(Id, StorageOps)>) {
-        let (sender, receiver) = mpsc::channel(channel_size);
-        (
-            ClientStorage {
-                client_type: client_type.to_string(),
-                db_cache: SizedCache::with_size(cache_size),
-                query_cache: HashMap::new(),
-                global,
-                receiver,
-            },
-            sender,
-        )
+    ) -> Self {
+        ClientStorage {
+            client_type: client_type.to_string(),
+            db_cache: Arc::from({
+                let mut v = Vec::with_capacity(cache_buckets);
+                let c = SizedCache::with_size(cache_size);
+                for _ in 0..cache_buckets {
+                    v.push(Mutex::new(c.clone()))
+                }
+                v
+            }),
+            query_cache: Arc::from(RwLock::new(HashMap::new())),
+            global,
+            hash_builder:HB::default()
+        }
     }
+
+    async fn run_cmd(&self, id: Id, op: StorageOps) {
+        let bucket=self.db_cache.get(id.h)
+    }
+
     async fn run(mut self) {
         let (loaded_sender, mut loaded_receiver) = mpsc::unbounded_channel::<(Id, ClientConfig)>();
         loop {
